@@ -1,6 +1,11 @@
+import { createHash } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import postgres from "postgres";
 import { day } from "./daten.ts";
 import { axeVerstoesse, CUSTOMERS, durchlaufSeite, einrichten, gehe, INVOICES, kontaktAnlegen, kundeWaehlen, rechnungFestschreiben } from "./einrichtung.ts";
+import { databaseUrlFuer } from "./durchlaeufe.ts";
 import { datei, formularOeffnen, fremdesPdf } from "./fremdrechnung-formular.ts";
 
 /**
@@ -8,7 +13,8 @@ import { datei, formularOeffnen, fremdesPdf } from "./fremdrechnung-formular.ts"
  * übernehmen. Fremde Nummer und Original bleiben, die Rechnung ist festgeschrieben und gebucht. Geprüft wird, was
  * der Nutzer sieht: PDF ohne E-Rechnung von Hand ausfüllen, Kunden im Formular neu anlegen, eine schon vorhandene
  * Nummer ablehnen und die Angaben aus einer E-Rechnung (ZUGFeRD aus Haben selbst) vorbelegen. Buchung, Zahlung und
- * die Steuerfälle (SKR03/SKR04 × Ist/Soll) prüft fremdrechnung.test.ts.
+ * die Steuerfälle (SKR03/SKR04 × Ist/Soll) prüft fremdrechnung.test.ts. Dazu die Karte „Aus dem Postfach“: PDFs, die der
+ * Abruf aus dem Ordner für Ausgangsrechnungen geholt hat (inbox.test.ts), prüfen, verwerfen und übernehmen.
  */
 test.describe.configure({ mode: "serial" });
 
@@ -165,4 +171,58 @@ test("Ein negativer Betrag wird schon im Formular abgefangen", async () => {
 
 test("Keine Seitenfehler im ganzen Durchlauf", () => {
   expect(pageErrors).toEqual([]);
+});
+
+/** Ein PDF so ablegen, wie es der Abruf aus dem Ausgangsordner des Postfachs tut: Datei unter ihrem Hash und eine Zeile als wartend */
+async function imPostfachAblegen(sql: postgres.Sql, nummer: string): Promise<void> {
+  const pdf = await fremdesPdf(page, nummer);
+  const sha256 = createHash("sha256").update(pdf).digest("hex");
+  const verzeichnis = join(`${process.env.E2E_DOCUMENTS_DIR ?? "test-results/e2e-belege"}-fremdrechnung`, sha256.slice(0, 2));
+  await mkdir(verzeichnis, { recursive: true });
+  await writeFile(join(verzeichnis, sha256), pdf);
+  await sql`
+    insert into inbox_outgoing (sha256, filename, mime_type, size, sender, subject, received_at)
+    values (${sha256}, ${`Rechnung-${nummer}.pdf`}, 'application/pdf', ${pdf.byteLength}, 'Webshop <rechnung@shop.example>', ${`Rechnung ${nummer}`}, now())`;
+}
+
+test("Aus dem Postfach: eine wartende Ausgangsrechnung verwerfen, eine übernehmen, die dritte bleibt", async () => {
+  const sql = postgres(databaseUrlFuer("fremdrechnung"), { max: 1, onnotice: () => {} });
+  try {
+    for (const nummer of ["PG-1", "PG-2", "PG-3"]) await imPostfachAblegen(sql, nummer);
+    await gehe(page, "/rechnungen");
+    const karte = page.getByRole("region", { name: "Aus dem Postfach" });
+    await expect(karte.getByText("3 offen")).toBeVisible();
+    await expect(karte.getByText("Webshop").first()).toBeVisible();
+    expect(await axeVerstoesse(page)).toEqual([]);
+
+    // Verwerfen fragt nach, die Datei verschwindet aus der Liste
+    await karte.getByRole("button", { name: "Weitere Aktionen zu PG-1" }).click();
+    await page.getByRole("menuitem", { name: "Verwerfen" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Verwerfen" }).click();
+    await expect(karte.getByText("2 offen")).toBeVisible();
+    await expect(karte.getByText("PG-1", { exact: true })).toHaveCount(0);
+
+    // Übernehmen öffnet das Formular mit dem PDF aus dem Postfach; gebucht wird erst nach der Bestätigung
+    await karte.getByRole("button", { name: "Übernehmen PG-2" }).click();
+    await expect(page.getByRole("form", { name: "Angaben zur Rechnung" })).toBeVisible();
+    await expect(page.getByText("Aus dem Postfach:")).toContainText("Rechnung-PG-2.pdf");
+    await angabenEintragen("PG-2");
+    await kundeWaehlen(page, KUNDE);
+    await page.getByRole("button", { name: "Übernehmen" }).click();
+    await page.waitForURL(/rechnungen\/[0-9a-f-]{36}$/);
+    await expect(page.getByRole("heading", { name: "Rechnung PG-2" })).toBeVisible();
+
+    // Zurück in der Liste wartet nur noch PG-3; die beiden anderen stehen mit ihrem Ergebnis in der Tabelle
+    await gehe(page, "/rechnungen");
+    await expect(karte.getByText("1 offen")).toBeVisible();
+    await expect(karte.getByText("PG-3", { exact: true })).toBeVisible();
+    const zeilen = await sql`select filename, status, invoice_id is not null as rechnung from inbox_outgoing order by filename`;
+    expect(zeilen.map((z) => ({ ...z }))).toEqual([
+      { filename: "Rechnung-PG-1.pdf", status: "verworfen", rechnung: false },
+      { filename: "Rechnung-PG-2.pdf", status: "uebernommen", rechnung: true },
+      { filename: "Rechnung-PG-3.pdf", status: "offen", rechnung: false },
+    ]);
+  } finally {
+    await sql.end();
+  }
 });
