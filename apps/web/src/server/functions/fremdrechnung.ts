@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { UserError } from "../errors.ts";
 import { authMiddleware } from "../middleware.ts";
 import { listContactChoices, loadCompany } from "../modules/stammdaten/index.ts";
+import { markOutgoingAdopted } from "../modules/belege/index.ts";
 import { kleinunternehmerStand } from "../modules/auswertungen/index.ts";
 import { adoptForeignInvoiceFile, foreignInvoiceProposal, type ForeignInvoiceInput, UmsatzgrenzeError } from "../modules/rechnungen/index.ts";
 
@@ -43,7 +44,9 @@ export const adoptForeignInvoiceFn = createServerFn({ method: "POST" })
     } catch {
       throw new UserError("Angaben zur Rechnung sind kein gültiges JSON.");
     }
-    return { file, parsed };
+    // Kommt die Datei aus dem Postfach, steht hier der Eintrag, der danach als übernommen gilt
+    const postfach = (data as FormData).get("postfach");
+    return { file, parsed, postfach: typeof postfach === "string" && postfach ? postfach : null };
   })
   .handler(async ({ data, context }) => {
     const bytes = new Uint8Array(await data.file.arrayBuffer());
@@ -58,6 +61,7 @@ export const adoptForeignInvoiceFn = createServerFn({ method: "POST" })
         },
         kleinunternehmerStand,
       );
+      if (data.postfach) await markOutgoingAdopted(context.user.id, data.postfach, id);
       return { status: "final" as const, id };
     } catch (error) {
       if (!(error instanceof UmsatzgrenzeError)) throw error;

@@ -8,7 +8,7 @@ import { ErrorBanner } from "./ErrorBanner.tsx";
 import { NoticeBanner } from "./NoticeBanner.tsx";
 import { fetchInboxNow, removeInbox, saveInbox, type getInbox } from "../server/functions/inbox.ts";
 import { Field } from "./Field.tsx";
-import { Status, Tag, type StatusTone } from "./Status.tsx";
+import { Status, type StatusTone } from "./Status.tsx";
 
 type Data = Awaited<ReturnType<typeof getInbox>>;
 type Settings = Data["settings"];
@@ -19,7 +19,12 @@ type AfterFetch = "seen" | "move" | "delete";
 function abrufText(r: Abruf): string {
   const ungelesen = r.rejected ? ` ${r.rejected} ${r.rejected === 1 ? "Mail" : "Mails"} nicht freigegebener Absender ungelesen gelassen.` : "";
   if (r.messages === 0) return `Keine neuen Mails.${ungelesen}`;
-  const teile = [`${r.documents} neue Belege`, r.duplicates ? `${r.duplicates} schon vorhanden` : "", r.skipped ? `${r.skipped} übersprungen` : ""];
+  const teile = [
+    `${r.documents} neue Belege`,
+    r.outgoing ? `${r.outgoing} Ausgangsrechnungen zum Übernehmen` : "",
+    r.duplicates ? `${r.duplicates} schon vorhanden` : "",
+    r.skipped ? `${r.skipped} übersprungen` : "",
+  ];
   return `${r.messages} ${r.messages === 1 ? "Mail" : "Mails"} gelesen: ${teile.filter(Boolean).join(", ")}.${ungelesen}`;
 }
 
@@ -257,8 +262,8 @@ function OrdnerFelder({ settings }: { settings: Settings }) {
           label="Ordner für Ausgangsrechnungen (optional)"
           hint={
             <>
-              <Tag>noch ohne Wirkung</Tag> Für Rechnungen aus Shop oder Fremdsystem. Haben liest diesen Ordner noch nicht; fremde Ausgangsrechnungen übernimmst
-              du bisher auf der Seite Rechnungen mit „Ausgangsrechnung hochladen“. Der Ordner muss ein anderer sein als der Eingangsordner.
+              Für Rechnungen aus Shop oder Fremdsystem. PDFs aus ungelesenen Mails landen auf der Seite Rechnungen unter „Aus dem Postfach“; gebucht wird erst,
+              wenn du die Angaben dort geprüft hast. Der Ordner muss ein anderer sein als der Eingangsordner.
             </>
           }
         >
