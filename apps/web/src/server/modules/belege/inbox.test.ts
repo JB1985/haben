@@ -585,6 +585,30 @@ describe.skipIf(!testDatabaseUrl)("Belege per E-Mail (Postgres)", () => {
       expect(await sql`select 1 from documents`).toHaveLength(1);
     });
 
+    it("legt eine Mail mit derselben Message-ID im Eingangs- und im Ausgangsordner in beiden Ordnern ab", async () => {
+      await inbox.saveInboxSettings(actor, { ...settings, outboundFolder: "Ausgang", afterFetch: "delete" });
+      const mail = rechnung("RE-9", { messageId: "<gleich@shop.example>" });
+      await deliver(mail);
+      await deliverOut({ ...mail, attachments: [{ filename: "RE-9-aus.pdf", content: pdf("RE-9-aus") }] });
+      await inbox.fetchInbox(actor);
+      expect(await sql`select 1 from documents`).toHaveLength(1);
+      // Die Mail im Ausgangsordner wird gelöscht, also muss die Ausgangsrechnung warten
+      expect(outBox.size).toBe(0);
+      expect((await ausgang.listOutgoing()).map((r) => r.filename)).toEqual(["RE-9-aus.pdf"]);
+    });
+
+    it("lässt eine Ausgangsrechnung nur einmal übernehmen und meldet einen unbekannten Eintrag", async () => {
+      await inbox.saveInboxSettings(actor, { ...settings, outboundFolder: "Ausgang" });
+      await deliverOut(rechnung("RE-10"));
+      await inbox.fetchInbox(actor);
+      const [eintrag] = await ausgang.listOutgoing();
+      await sql`update inbox_outgoing set status = 'uebernommen' where id = ${eintrag!.id}`;
+      await expect(ausgang.markOutgoingAdopted(actor, eintrag!.id, "00000000-0000-4000-8000-000000000001")).rejects.toThrow(/wartet nicht mehr/);
+      await expect(ausgang.markOutgoingAdopted(actor, "00000000-0000-4000-8000-000000000002", "00000000-0000-4000-8000-000000000001")).rejects.toThrow(
+        /wartet nicht mehr/,
+      );
+    });
+
     it("merkt sich die übernommene Rechnung und bietet die Datei danach nicht mehr an", async () => {
       await inbox.saveInboxSettings(actor, { ...settings, outboundFolder: "Ausgang" });
       await deliverOut(rechnung("RE-8"));
