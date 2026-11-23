@@ -167,8 +167,8 @@ type Direction = "eingang" | "ausgang";
 const FAILED = "Verarbeitung fehlgeschlagen: ";
 /** Eintrag von recordFailure: keine Belege, nur der Grund; der Mail kann ein neuer Versuch folgen */
 const isRetryable = (row: { skipped: string[]; documentIds: string[] }) => row.documentIds.length === 0 && !!row.skipped[0]?.startsWith(FAILED);
-/** Schlüssel in inbox_messages */
-const keyOf = (messageId: string) => messageId.slice(0, 998);
+/** Schlüssel in inbox_messages; dieselbe Mail im Ausgangsordner hat einen eigenen, sonst verdrängt die Kopie im Eingang sie */
+const keyOf = (messageId: string, direction: Direction = "eingang") => (direction === "ausgang" ? `ausgang: ${messageId}` : messageId).slice(0, 998);
 /** Schlüssel für das Nachholen einer Mail, deren erster Versuch fehlschlug */
 const retryKey = (messageId: string, n: number) => `${messageId.slice(0, 970)}${n === 1 ? " (nachgeholt)" : ` (nachgeholt ${n})`}`;
 
@@ -211,7 +211,7 @@ async function processMessage(
 ) {
   const mail = await simpleParser(source.bytes);
   const messageId = messageIdOf(mail, source.bytes);
-  const key = await freeKey(keyOf(messageId));
+  const key = await freeKey(keyOf(messageId, direction));
   if (!key) return null;
 
   const from = mail.from?.value[0];
@@ -282,7 +282,7 @@ function messageIdOf(mail: { messageId?: string }, bytes: Buffer) {
 async function recordFailure(actor: string, bytes: Buffer, error: unknown, direction: Direction = "eingang") {
   const mail = await simpleParser(bytes).catch(() => null);
   const from = mail?.from?.value[0];
-  const key = await freeKey(keyOf(mail ? messageIdOf(mail, bytes) : messageIdOf({}, bytes)));
+  const key = await freeKey(keyOf(mail ? messageIdOf(mail, bytes) : messageIdOf({}, bytes), direction));
   if (!key) return;
   await withActor(actor, (tx) =>
     tx

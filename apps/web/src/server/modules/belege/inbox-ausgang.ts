@@ -56,14 +56,21 @@ export async function outgoingFile(id: string): Promise<{ row: OutgoingRow; byte
   return { row, bytes: new Uint8Array(await loadFile(row.sha256)) };
 }
 
+/** Vor dem Buchen: Der Eintrag muss noch warten, sonst entstünde aus derselben Datei eine zweite Rechnung */
+export async function assertOutgoingOpen(id: string): Promise<void> {
+  await outgoingFile(id);
+}
+
 /** Nach dem Übernehmen: Eintrag erledigt, mit der entstandenen Rechnung */
 export async function markOutgoingAdopted(actor: string, id: string, invoiceId: string): Promise<void> {
-  await withActor(actor, (tx) =>
+  const done = await withActor(actor, (tx) =>
     tx
       .update(schema.inboxOutgoing)
       .set({ status: "uebernommen", invoiceId })
-      .where(and(eq(schema.inboxOutgoing.id, id), eq(schema.inboxOutgoing.status, "offen"))),
+      .where(and(eq(schema.inboxOutgoing.id, id), eq(schema.inboxOutgoing.status, "offen")))
+      .returning({ id: schema.inboxOutgoing.id }),
   );
+  if (done.length === 0) throw new UserError("Diese Ausgangsrechnung wartet nicht mehr im Postfach.");
 }
 
 /** Verwerfen: Die Datei wird nicht übernommen und vom Abruf nicht wieder angeboten */

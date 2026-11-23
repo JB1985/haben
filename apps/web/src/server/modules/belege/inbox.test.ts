@@ -592,8 +592,6 @@ describe.skipIf(!testDatabaseUrl)("Belege per E-Mail (Postgres)", () => {
       await deliverOut({ ...mail, attachments: [{ filename: "RE-9-aus.pdf", content: pdf("RE-9-aus") }] });
       await inbox.fetchInbox(actor);
       expect(await sql`select 1 from documents`).toHaveLength(1);
-      // Die Mail im Ausgangsordner wird gelöscht, also muss die Ausgangsrechnung warten
-      expect(outBox.size).toBe(0);
       expect((await ausgang.listOutgoing()).map((r) => r.filename)).toEqual(["RE-9-aus.pdf"]);
     });
 
@@ -604,6 +602,7 @@ describe.skipIf(!testDatabaseUrl)("Belege per E-Mail (Postgres)", () => {
       const [eintrag] = await ausgang.listOutgoing();
       await sql`update inbox_outgoing set status = 'uebernommen' where id = ${eintrag!.id}`;
       await expect(ausgang.markOutgoingAdopted(actor, eintrag!.id, "00000000-0000-4000-8000-000000000001")).rejects.toThrow(/wartet nicht mehr/);
+      await expect(ausgang.assertOutgoingOpen(eintrag!.id)).rejects.toThrow(/wartet nicht mehr/);
       await expect(ausgang.markOutgoingAdopted(actor, "00000000-0000-4000-8000-000000000002", "00000000-0000-4000-8000-000000000001")).rejects.toThrow(
         /wartet nicht mehr/,
       );

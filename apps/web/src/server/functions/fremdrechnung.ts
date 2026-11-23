@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { UserError } from "../errors.ts";
 import { authMiddleware } from "../middleware.ts";
 import { listContactChoices, loadCompany } from "../modules/stammdaten/index.ts";
-import { markOutgoingAdopted } from "../modules/belege/index.ts";
+import { assertOutgoingOpen, markOutgoingAdopted } from "../modules/belege/index.ts";
 import { kleinunternehmerStand } from "../modules/auswertungen/index.ts";
 import { adoptForeignInvoiceFile, foreignInvoiceProposal, type ForeignInvoiceInput, UmsatzgrenzeError } from "../modules/rechnungen/index.ts";
 
@@ -50,6 +50,7 @@ export const adoptForeignInvoiceFn = createServerFn({ method: "POST" })
   })
   .handler(async ({ data, context }) => {
     const bytes = new Uint8Array(await data.file.arrayBuffer());
+    if (data.postfach) await assertOutgoingOpen(data.postfach);
     try {
       const { id } = await adoptForeignInvoiceFile(
         context.user.id,

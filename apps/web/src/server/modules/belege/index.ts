@@ -53,7 +53,7 @@ export {
   runDueInboxFetch,
   saveInboxSettings,
 } from "./inbox.ts";
-export { discardOutgoing, listOutgoing, markOutgoingAdopted, outgoingFile } from "./inbox-ausgang.ts";
+export { assertOutgoingOpen, discardOutgoing, listOutgoing, markOutgoingAdopted, outgoingFile } from "./inbox-ausgang.ts";
 export {
   createDauerbeleg,
   DAUERBELEG_AKTIONEN,
