@@ -38,8 +38,8 @@ export function BereicheCard({ ausgeblendet }: { ausgeblendet: readonly string[]
     <section className="card stack" aria-labelledby="bereiche-heading">
       <h2 id="bereiche-heading">Bereiche im Menü</h2>
       <p className="small muted" style={{ margin: 0 }}>
-        Was du nicht brauchst, blendest du aus. Es verschwindet nur aus Menü und Schnellsuche; Daten, Auswertungen und Links bleiben. Rechnungen, Belege, Bank,
-        Umsatzsteuer und Jahreserklärung stehen immer im Menü.
+        Was du nicht brauchst, blendest du aus. Es verschwindet nur aus Menü, Schnellsuche und den Knöpfen dorthin; Daten, Auswertungen und Links bleiben.
+        Rechnungen, Belege, Bank, Umsatzsteuer und Jahreserklärung stehen immer im Menü.
       </p>
       <ul className="bereiche-liste">
         {BEREICHE.map((bereich) => {
@@ -61,7 +61,7 @@ export function BereicheCard({ ausgeblendet }: { ausgeblendet: readonly string[]
                     ·{" "}
                   </>
                 )}
-                Im Menü: {bereich.menue}
+                {bereich.wirkung}
               </span>
             </li>
           );

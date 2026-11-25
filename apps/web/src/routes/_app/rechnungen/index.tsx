@@ -6,6 +6,7 @@ import { Field } from "../../../components/Field.tsx";
 import { ForeignInvoiceImport } from "../../../components/ForeignInvoiceImport.tsx";
 import { InvoiceTabs } from "../../../components/InvoiceTabs.tsx";
 import { InvoiceStatus } from "../../../components/InvoiceStatus.tsx";
+import { useBereichAktiv } from "../../../lib/use-bereich.ts";
 import { formatDate } from "../../../lib/format.ts";
 import { VARIANT_TITLE } from "../../../lib/invoice.ts";
 import { getInvoices } from "../../../server/functions/invoices.ts";
@@ -24,6 +25,7 @@ function InvoicesPage() {
   const { suche } = Route.useSearch();
   const [query, setQuery] = useState(suche ?? "");
   const [importing, setImporting] = useState(false);
+  const schreiben = useBereichAktiv("rechnungserstellung");
   useEffect(() => {
     setQuery(suche ?? "");
   }, [suche]);
@@ -50,9 +52,11 @@ function InvoicesPage() {
             <button type="button" className="btn" onClick={() => setImporting(true)}>
               Ausgangsrechnung hochladen
             </button>
-            <Link to="/rechnungen/neu" className="btn btn-primary">
-              Neue Rechnung
-            </Link>
+            {schreiben && (
+              <Link to="/rechnungen/neu" className="btn btn-primary">
+                Neue Rechnung
+              </Link>
+            )}
           </div>
         )}
       </div>
@@ -69,7 +73,7 @@ function InvoicesPage() {
       <section className="card" aria-label="Rechnungsliste">
         {invoices.length === 0 ? (
           <p className="muted" style={{ margin: 0 }}>
-            Noch keine Rechnungen. Die erste legst du mit „Neue Rechnung“ an.
+            {schreiben ? "Noch keine Rechnungen. Die erste legst du mit „Neue Rechnung“ an." : "Noch keine Rechnungen."}
           </p>
         ) : shown.length === 0 ? (
           <p className="muted" style={{ margin: 0 }}>

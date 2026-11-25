@@ -50,7 +50,7 @@ Nach dem ersten Konto stellt Haben ein paar Fragen in drei Schritten:
 
 - **Dein Unternehmen:** freiberuflich (Einkunftsart selbständige Arbeit), mit Gewerbe (Gewerbebetrieb), GmbH oder UG; Kleinunternehmer; ohne Kleinunternehmer Ist- oder Soll-Versteuerung und ob du die Voranmeldung monatlich oder vierteljährlich abgibst; nur steuerfreie Umsätze ohne Vorsteuerabzug; mit Steuerberatung deren Kontenrahmen.
 - **Start in Haben:** Wer von einem anderen Programm wechselt, findet hier den Weg zum Umzug im Archiv.
-- **Bereiche:** ob du Angebote schreibst, Angestellte hast, Bargeld einnimmst, per Lastschrift einziehst und Anlagen oder Darlehen hast.
+- **Bereiche:** ob du deine Rechnungen mit Haben schreibst und mahnst, Artikel, Zeiteinträge und Textbausteine nutzt, Angebote schreibst, Angestellte hast, Bargeld einnimmst, per Lastschrift einziehst und Anlagen oder Darlehen hast.
 
 Jede Frage hat „Weiß ich nicht“, und „Später“ überspringt alles; dann erinnert die Übersicht daran, bis du die Fragen beantwortest oder die Firmendaten speicherst. Die Antworten schreiben die vorhandenen Angaben der [Firmendaten](#firmendaten) und den [Voranmeldungszeitraum](umsatzsteuer.md#voranmeldungszeitraum) ab Januar des laufenden Jahres, mit denselben [Sperren](#wann-sich-die-einstellungen-ändern-lassen) wie dort. „Weiß ich nicht“ lässt die bisherige Angabe stehen, beim ersten Mal die Vorgabe (Einzelunternehmen, kein Kleinunternehmer). Bleiben Rechtsform oder Kleinunternehmer so offen, erinnert die Übersicht daran, bis du sie in den Fragen beantwortest oder die Firmendaten speicherst.
 
@@ -58,7 +58,7 @@ Unter **Einstellungen › Bereiche** öffnet „Fragen erneut durchgehen“ die 
 
 ### Bereiche ausblenden
 
-Die Menüpunkte eines Bereichs, den du mit „Nein“ beantwortest, verschwinden aus dem Menü und aus den Seiten der [Schnellsuche](suche.md): Angebote; Personal mit Lohn und SV-Meldeportal; Kasse; Lastschriften; Anlagen und Darlehen. Mehr passiert nicht: Daten, Buchungen, Auswertungen, Treffer der Schnellsuche, API und direkte Links bleiben, wie sie sind. Unter **Einstellungen › Bereiche** schaltest du jeden Bereich mit einem Haken wieder ein oder aus. Rechnungen, Belege, Bank, Umsatzsteuer und Jahreserklärung stehen immer im Menü. Instanzen von vor dem Update zeigen alle Bereiche.
+Die Menüpunkte eines Bereichs, den du mit „Nein“ beantwortest, verschwinden aus dem Menü und aus den Seiten der [Schnellsuche](suche.md): Angebote; Personal mit Lohn und SV-Meldeportal; Kasse; Lastschriften; Anlagen und Darlehen; Artikel; Zeiteinträge; Textbausteine. **Rechnungen schreiben** und **Mahnwesen** haben keinen eigenen Menüpunkt: Ohne „Rechnungen schreiben“ fehlen die Knöpfe „Neue Rechnung“, „Rechnung schreiben“, „Rechnung erstellen“, „Abschlagsrechnung erstellen“, „Schlussrechnung erstellen“, „Abrechnen“ und „Kopieren“ an Rechnungen, ohne „Mahnwesen“ der Reiter und die Knöpfe zum Mahnen. Wiederkehrende Rechnungen, Storno, Korrektur, Ersatzrechnung und das Hochladen von Ausgangsrechnungen bleiben. Mehr passiert nicht: Daten, Buchungen, Auswertungen, Treffer der Schnellsuche, API und direkte Links bleiben, wie sie sind. Unter **Einstellungen › Bereiche** schaltest du jeden Bereich mit einem Haken wieder ein oder aus. Rechnungen, Belege, Bank, Umsatzsteuer und Jahreserklärung stehen immer im Menü. Instanzen von vor dem Update zeigen alle Bereiche.
 
 ## Die Übersicht
 

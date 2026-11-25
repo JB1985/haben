@@ -8,6 +8,7 @@ import { SendMailForm } from "../../../components/SendMail.tsx";
 import { formatDate, formatDateTime } from "../../../lib/format.ts";
 import { NoticeBanner } from "../../../components/NoticeBanner.tsx";
 import { useAction } from "../../../lib/use-action.ts";
+import { useBereichAktiv } from "../../../lib/use-bereich.ts";
 import { cancelFinalInvoice, correctFinalInvoice } from "../../../server/functions/invoices.ts";
 import { ConfirmDialog } from "../../../components/ConfirmDialog.tsx";
 import { OutcomeStatus } from "../../../components/Status.tsx";
@@ -23,6 +24,7 @@ export function FinalInvoice({ data }: { data: Detail }) {
   const { invoice, correctedBy } = data;
   // Die Steuerberatung sieht die Rechnung, ändert und versendet aber nichts
   const inhaber = route.useRouteContext().user.role === "inhaber";
+  const mahnwesen = useBereichAktiv("mahnwesen");
   const router = useRouter();
   const navigate = useNavigate();
   const cancel = useServerFn(cancelFinalInvoice);
@@ -120,7 +122,7 @@ export function FinalInvoice({ data }: { data: Detail }) {
             )}
           </section>
 
-          {(data.dunnings.length > 0 || data.overdue) && (
+          {(data.dunnings.length > 0 || (mahnwesen && data.overdue)) && (
             <section className="card" aria-labelledby="dunning-heading">
               <h2 id="dunning-heading">Mahnungen</h2>
               {data.dunnings.map((d) => (
@@ -146,7 +148,7 @@ export function FinalInvoice({ data }: { data: Detail }) {
                 </div>
               ))}
               {mailing?.kind === "mahnung" && <SendMailForm key={mailing.id} kind="mahnung" id={mailing.id} onDone={mailDone} />}
-              {inhaber && data.overdue && (
+              {inhaber && mahnwesen && data.overdue && (
                 <div className="actions">
                   <Link to="/rechnungen/mahnwesen/$id" params={{ id: invoice.id }} className="btn">
                     {data.dunnings.length === 0 ? "Zahlungserinnerung erstellen" : "Nächste Mahnstufe"}

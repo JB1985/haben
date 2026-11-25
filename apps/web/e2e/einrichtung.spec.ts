@@ -104,6 +104,32 @@ test("Einstellungen › Bereiche schaltet sofort wieder ein", async () => {
   await expect(karte.getByRole("checkbox", { name: /Personal/ })).toBeChecked();
 });
 
+test("Rechnungen schreiben, Mahnwesen und Artikel abschalten nimmt Knöpfe, Reiter und Menüpunkt weg", async () => {
+  await gehe(page, "/einstellungen?bereich=bereiche");
+  const karte = page.getByRole("region", { name: "Bereiche im Menü" });
+  const bereiche = ["Rechnungen schreiben", "Mahnwesen", "Artikel"];
+  for (const name of bereiche) {
+    await karte.getByRole("checkbox", { name, exact: true }).uncheck();
+    await expect(page.getByText(`${name} ist ausgeblendet.`)).toBeVisible();
+  }
+  await expect(menue().getByRole("link", { name: "Artikel", exact: true })).toHaveCount(0);
+
+  await gehe(page, "/rechnungen");
+  const reiter = page.getByRole("navigation", { name: "Bereiche der Rechnungen" });
+  await expect(reiter.getByRole("link", { name: "Wiederkehrend" })).toBeVisible();
+  await expect(reiter.getByRole("link", { name: "Mahnwesen" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Neue Rechnung" })).toHaveCount(0);
+
+  await gehe(page, "/einstellungen?bereich=bereiche");
+  for (const name of bereiche) {
+    await karte.getByRole("checkbox", { name, exact: true }).check();
+    await expect(page.getByText(`${name} steht wieder im Menü.`)).toBeVisible();
+  }
+  await gehe(page, "/rechnungen");
+  await expect(page.getByRole("link", { name: "Neue Rechnung" })).toBeVisible();
+  await expect(reiter.getByRole("link", { name: "Mahnwesen" })).toBeVisible();
+});
+
 test("Fragen erneut durchgehen: vorausgefüllt, geänderte Rechtsform erst nach Rückfrage", async () => {
   await gehe(page, "/einstellungen?bereich=bereiche");
   await page.getByRole("link", { name: "Fragen erneut durchgehen" }).click();
