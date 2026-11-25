@@ -26,6 +26,7 @@ import { ArchiveTargetCard } from "../../components/ArchiveTargetCard.tsx";
 import { DatevCard } from "../../components/DatevCard.tsx";
 import { KontoabrufKarten } from "../../components/FintsCard.tsx";
 import { StoreReportsCard } from "../../components/StoreReportsCard.tsx";
+import { VividCard } from "../../components/VividCard.tsx";
 import { ExchangeRatesCard } from "../../components/ExchangeRatesCard.tsx";
 import { FilePicker } from "../../components/FilePicker.tsx";
 import { ExportCard } from "../../components/ExportCard.tsx";
@@ -65,6 +66,7 @@ import { emailFehler, useSubmitCheck } from "../../lib/use-submit-check.ts";
 import { getBackupStatus } from "../../server/functions/backup.ts";
 import { getEnableBankingSettings } from "../../server/functions/bank.ts";
 import { getStoreConnections } from "../../server/functions/stores.ts";
+import { getVividSettings } from "../../server/functions/vivid.ts";
 import { removeCertificate, uploadCertificate } from "../../server/functions/certificate.ts";
 import { RELIGIONEN } from "../../lib/religion.ts";
 import { SETTINGS_AREAS, settingsAreas, type SettingsArea } from "../../lib/settings-areas.ts";
@@ -119,6 +121,7 @@ export const Route = createFileRoute("/_app/einstellungen")({
       rates,
       enableBanking,
       stores,
+      vivid,
       customPages,
       zugaenge,
       extraction,
@@ -145,6 +148,7 @@ export const Route = createFileRoute("/_app/einstellungen")({
       getExchangeRates(),
       getEnableBankingSettings(),
       getStoreConnections(),
+      getVividSettings(),
       getCustomPages(),
       getZugaenge(),
       getExtractionSettings(),
@@ -174,6 +178,7 @@ export const Route = createFileRoute("/_app/einstellungen")({
       rates,
       enableBanking,
       stores,
+      vivid,
       customPages,
       zugaenge,
       extraction,
@@ -210,6 +215,7 @@ function SettingsPage() {
     rates,
     enableBanking,
     stores,
+    vivid,
     customPages,
     zugaenge,
     extraction,
@@ -283,6 +289,7 @@ function SettingsPage() {
             <>
               <KontoabrufKarten data={enableBanking} />
               <StoreReportsCard connections={stores.connections} contacts={stores.contacts} />
+              <VividCard data={vivid} />
             </>
           )}
           {bereich === "zugaenge" && zugaenge.mode === "sso" && <SsoZugaengeCard accounts={zugaenge.ssoAccounts} providerName={oidc.name} />}

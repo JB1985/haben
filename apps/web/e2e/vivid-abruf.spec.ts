@@ -75,6 +75,7 @@ test.afterEach(() => {
 });
 
 const abruf = () => page.getByRole("region", { name: "Automatischer Abruf" });
+const karte = () => page.getByRole("region", { name: "Vivid Business" });
 const formular = () => page.getByRole("form", { name: "Vivid verbinden" });
 
 test("Einrichtung", async () => {
@@ -82,8 +83,7 @@ test("Einrichtung", async () => {
 });
 
 test("verlangt den Schlüssel im Formular, bevor Haben Vivid fragt", async () => {
-  await gehe(page, "/bank");
-  await abruf().getByRole("button", { name: "Vivid verbinden" }).click();
+  await gehe(page, "/einstellungen?bereich=bank");
   await formular().getByRole("button", { name: "Verbinden" }).click();
   await expect(formular().getByText("Der API-Schlüssel fehlt.")).toBeVisible();
   await expect(formular().getByLabel("API-Schlüssel")).toBeFocused();
@@ -99,8 +99,9 @@ test("meldet einen Schlüssel, den Vivid nicht annimmt", async () => {
 test("verbindet, legt das Konto an und holt die gebuchten Umsätze ohne die vorgemerkte Zahlung", async () => {
   await formular().getByLabel("API-Schlüssel").fill(SCHLUESSEL);
   await formular().getByRole("button", { name: "Verbinden" }).click();
-  await expect(abruf().getByText("Vivid verbunden: 2 neue Umsätze.")).toBeVisible();
-  await expect(abruf().getByText(/Neu angelegt: Vivid Hauptkonto …3000/)).toBeVisible();
+  await expect(karte().getByText("Vivid verbunden: 2 neue Umsätze.")).toBeVisible();
+  await expect(karte().getByText(/Neu angelegt: Vivid Hauptkonto …3000/)).toBeVisible();
+  await gehe(page, "/bank");
   await expect(abruf().getByText("Aktiv")).toBeVisible();
   const konten = page.getByRole("navigation", { name: "Konten" });
   await expect(konten.getByRole("link", { name: /Vivid Hauptkonto …3000/ })).toContainText("Abruf");
@@ -121,6 +122,6 @@ test("Trennen löscht die Verbindung, die Umsätze bleiben", async () => {
   await abruf().getByRole("button", { name: "Trennen" }).click();
   await bestaetigen(page, "Trennen");
   await expect(abruf().getByText("Vivid Business", { exact: true })).toHaveCount(0);
-  await expect(abruf().getByText(/Noch keine Bank verbunden/)).toBeVisible();
+  await expect(page.getByText(/Automatischer Abruf: mit einer Enable-Banking-Anwendung/)).toBeVisible();
   await expect(page.getByText("Kaffee Beispiel").first()).toBeVisible();
 });

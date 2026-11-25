@@ -6,9 +6,9 @@ description: >-
 
 # Abruf über Vivid
 
-Konten bei Vivid Business holt Haben über deren eigene [API](https://api.prime.vivid.money/sme-integration/docs/), ohne Enable Banking und ohne FinTS. Dafür brauchst du einen API-Schlüssel aus Vivid ([Anbindungen](installation-anbindungen.md#kontoabruf-über-vivid)).
+Konten bei Vivid Business holt Haben über deren eigene [API](https://api.prime.vivid.money/sme-integration/docs/), ohne Enable Banking und ohne FinTS. Ohne API-Schlüssel bindest du Vivid wie jede andere Bank über Enable Banking an. Für den Abruf über die API brauchst du einen API-Schlüssel aus Vivid ([Anbindungen](installation-anbindungen.md#kontoabruf-über-vivid)).
 
-1. Unter **Bank** **Vivid verbinden** klicken, den API-Schlüssel einfügen und **Verbinden**.
+1. Unter **Einstellungen › Bank** bei **Vivid Business** den API-Schlüssel einfügen und **Verbinden**. Danach steht die Verbindung auch unter **Bank** im Bereich **Automatischer Abruf**.
 2. Haben ordnet die Konten in Euro über die IBAN zu, legt fehlende an („Vivid Hauptkonto …1234“) und holt sofort die Umsätze. Danach ruft es einmal täglich ab; **Jetzt abrufen** holt sie sofort.
 
 Was dabei gilt:
@@ -19,5 +19,5 @@ Was dabei gilt:
 - **Verwendungszweck und Gegenseite:** Die API nennt beides nicht. Bei Kartenzahlungen steht der Händler als Gegenseite, im Zweck Art, Karte, Ort und Betrag in Fremdwährung; bei Überweisungen nur „Überweisung“. Die [Vorschläge](bank.md#vorschläge) gehen dort nur nach Betrag.
 - **Kontostand:** Vivid nennt nur den verfügbaren Betrag, keinen gebuchten Saldo. Haben übernimmt keinen und prüft keine Salden.
 - **Rechte:** Beim Verbinden prüft Haben, ob der Schlüssel Konten und Umsätze lesen darf, bevor ein Konto von Enable Banking oder FinTS zu Vivid wechselt.
-- **Schlüssel abgelehnt:** Ist der Schlüssel abgelaufen (nach höchstens 180 Tagen), gelöscht oder fehlt ihm ein Recht, steht die Verbindung auf **Schlüssel abgelehnt**, und der tägliche Abruf ruht. Mit **Vivid verbinden** und einem neuen Schlüssel macht Haben dort weiter, wo es aufgehört hat; die alte Verbindung fällt weg.
+- **Schlüssel abgelehnt:** Ist der Schlüssel abgelaufen (nach höchstens 180 Tagen), gelöscht oder fehlt ihm ein Recht, steht die Verbindung auf **Schlüssel abgelehnt**, und der tägliche Abruf ruht. Mit einem neuen Schlüssel unter **Einstellungen › Bank** macht Haben dort weiter, wo es aufgehört hat; die alte Verbindung fällt weg.
 - Ein Konto ruft Haben nur über einen Weg ab: Kam es bisher über Enable Banking oder FinTS, fällt es dort heraus. **Trennen** löscht den Schlüssel in Haben; in Vivid gilt er, bis du ihn dort löschst.

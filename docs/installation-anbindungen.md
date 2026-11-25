@@ -230,7 +230,7 @@ Für Konten bei Vivid Business; der Betreiber richtet nichts ein. Den API-Schlü
 
 1. In Vivid Business im Web **API** öffnen und **Add API token** wählen.
 2. Die Rechte `accounts:read` und `transactions:read` ankreuzen, die Laufzeit wählen (höchstens 180 Tage). Wer den Schlüssel auf IP-Adressen beschränkt, trägt die Adresse ein, unter der der Server von Haben ins Internet geht.
-3. Den Schlüssel kopieren (Vivid zeigt ihn nur einmal) und in Haben unter **Bank** › **Vivid verbinden** einfügen.
+3. Den Schlüssel kopieren (Vivid zeigt ihn nur einmal) und in Haben unter **Einstellungen › Bank** bei **Vivid Business** einfügen.
 
 Der Schlüssel sieht, was die Person sieht, die ihn angelegt hat; verlässt sie die Firma, gilt er nicht mehr. Haben speichert ihn verschlüsselt in der Datenbank, im Audit-Log steht er nicht. Die API ist nur lesend: Zahlungen kann Haben darüber nicht auslösen. Haben spricht nur mit `api.prime.vivid.money`, über TLS.
 
