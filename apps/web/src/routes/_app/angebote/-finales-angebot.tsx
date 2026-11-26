@@ -321,7 +321,7 @@ function AnswerCard({
         <>
           <p className="small muted" style={{ margin: 0 }}>
             {listStatus === "abgelaufen"
-              ? `Das Angebot ist seit dem ${formatDate(quote.validUntil)} abgelaufen. Nimmt der Kunde trotzdem an, kannst du es weiter abrechnen.`
+              ? `Das Angebot ist seit dem ${formatDate(quote.validUntil)} abgelaufen.${schreiben ? " Nimmt der Kunde trotzdem an, kannst du es weiter abrechnen." : ""}`
               : listStatus === "abgelehnt"
                 ? "Als abgelehnt markiert."
                 : schreiben

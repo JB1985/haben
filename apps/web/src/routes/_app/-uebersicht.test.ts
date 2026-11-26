@@ -151,7 +151,7 @@ describe("Übersicht: ausgeblendete Bereiche", () => {
   it("lässt ohne „Rechnungen schreiben“ die Knöpfe weg und führt ohne Mahnwesen zu den Rechnungen", () => {
     state.ausgeblendet = ["rechnungserstellung", "mahnwesen"];
     const html = render();
-    expect(html).toContain("2 Rechnungen überfällig");
+    expect(html).toMatch(/<a [^>]*href="\/rechnungen"[^>]*>(?:(?!<\/a>)[\s\S])*2 Rechnungen überfällig(?:(?!<\/a>)[\s\S])*Ansehen/);
     for (const fehlt of ["Neue Rechnung", "Erste Rechnung schreiben", "/rechnungen/neu", "/rechnungen/mahnwesen", "Mahnen"]) expect(html).not.toContain(fehlt);
   });
 });
