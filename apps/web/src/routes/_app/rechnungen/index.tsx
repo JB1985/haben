@@ -11,6 +11,7 @@ import { formatDate } from "../../../lib/format.ts";
 import { VARIANT_TITLE } from "../../../lib/invoice.ts";
 import { getInvoices } from "../../../server/functions/invoices.ts";
 import { Icon } from "../../../components/Icon.tsx";
+import { menueGruppe } from "../../../lib/menue-gruppe.ts";
 
 export const Route = createFileRoute("/_app/rechnungen/")({
   validateSearch: z.object({ suche: z.optional(z.string()) }),
@@ -44,7 +45,7 @@ function InvoicesPage() {
     <>
       <div className="page-head">
         <div>
-          <div className="eyebrow">Verkauf</div>
+          <div className="eyebrow">{menueGruppe("/rechnungen", inhaber)}</div>
           <h1>Rechnungen</h1>
         </div>
         {inhaber && (
@@ -72,9 +73,16 @@ function InvoicesPage() {
       )}
       <section className="card" aria-label="Rechnungsliste">
         {invoices.length === 0 ? (
-          <p className="muted" style={{ margin: 0 }}>
-            {schreiben ? "Noch keine Rechnungen. Die erste legst du mit „Neue Rechnung“ an." : "Noch keine Rechnungen."}
-          </p>
+          <>
+            <p className="muted" style={{ margin: 0 }}>
+              {inhaber && schreiben ? "Hier stehen die Rechnungen, die du an Kunden schreibst." : "Hier stehen die Rechnungen an Kunden."}
+            </p>
+            {inhaber && schreiben && (
+              <Link to="/rechnungen/neu" className="btn btn-primary" style={{ alignSelf: "flex-start" }}>
+                Neue Rechnung
+              </Link>
+            )}
+          </>
         ) : shown.length === 0 ? (
           <p className="muted" style={{ margin: 0 }}>
             Keine Rechnung passt zu „{query}“.

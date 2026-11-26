@@ -26,6 +26,7 @@ vi.mock("@tanstack/react-router", () => ({
   Link: ({ children, to, params, className }: { children: ReactNode; to: string; params?: { id?: string }; className?: string }) =>
     createElement("a", { href: params?.id ? to.replace("$id", params.id) : to, className }, children),
 }));
+import { EricHinweis } from "../../components/EricHinweis.tsx";
 import { Route } from "./index.tsx";
 
 function fixture() {
@@ -62,6 +63,7 @@ function fixture() {
   };
 }
 
+const hinweis = renderToStaticMarkup(createElement(EricHinweis));
 const render = () => renderToStaticMarkup(createElement(Route.options.component as ComponentType));
 
 describe("Übersicht: relevante Voranmeldungshinweise (#691)", () => {
@@ -73,7 +75,7 @@ describe("Übersicht: relevante Voranmeldungshinweise (#691)", () => {
     const html = render();
     expect(html).not.toContain("Voranmeldung Oktober 2026");
     expect(html).not.toContain("USt-Zahllast");
-    expect(html).not.toContain("ERiC ist nicht eingerichtet");
+    expect(html).not.toContain(hinweis);
     expect(html).not.toContain("Letzte Voranmeldungen");
     expect(html).not.toContain("ELSTER-Zertifikat");
     expect(html).toContain("Neue Rechnung");
@@ -86,7 +88,7 @@ describe("Übersicht: relevante Voranmeldungshinweise (#691)", () => {
     expect(html).toContain("Voranmeldung Oktober 2026 senden");
     expect(html).toContain("Voranmeldung fällig 10.11.2026");
     expect(html).toContain("USt-Zahllast Oktober 2026");
-    expect(html).toContain("ERiC ist nicht eingerichtet");
+    expect(html).toContain(hinweis);
   });
 
   it("bei Befreiung ohne vorhandene Anmeldung entsteht keine Voranmeldungsaufforderung", () => {
@@ -95,7 +97,7 @@ describe("Übersicht: relevante Voranmeldungshinweise (#691)", () => {
     const html = render();
     expect(html).not.toContain("Voranmeldung Oktober 2026");
     expect(html).not.toContain("USt-Zahllast");
-    expect(html).not.toContain("ERiC ist nicht eingerichtet");
+    expect(html).not.toContain(hinweis);
   });
 
   it("vorhandene übermittelte Anmeldung bleibt auch für einen Kleinunternehmer erreichbar", () => {
