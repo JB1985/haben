@@ -140,6 +140,7 @@ Statt des CSV-Exports „Balance history“ kann Haben die Umsätze von Stripe s
 - Ihre Werte stehen dann in dieser Reihenfolge als Verwendungszweck neuer Umsätze, zum Beispiel „RE-2026-0117“. Ist darunter die Rechnungs- oder Bestellnummer, zählt sie bei den [Vorschlägen](bank.md#vorschläge) des Abgleichs.
 - Das gilt für Zahlungen, Erstattungen und Streitfälle; Erstattungen und Streitfälle bekommen die Werte der ursprünglichen Zahlung.
 - Ohne Eintrag oder ohne Wert gilt der Zweck des Exports, ebenso immer bei allen anderen Umsätzen, etwa Auszahlungen, Gebühren und Transfers.
+- Er gilt auch, wenn der Zweck aus den Metadaten mit „Gebühr“ begänne, denn daran erkennt Haben Gebühren.
 - Für [Dubletten](bank.md#dubletten) zählt weiter der Zweck des Exports, auch wenn der Umsatz die Metadaten zeigt.
 - Wähle nur, was dort dauerhaft stehen darf, denn Bankumsätze lassen sich nicht ändern.
 
