@@ -410,3 +410,14 @@ test("Aus dem Postfach: wartet die nächste Datei der Reihe nicht mehr, steht di
     await expect(page.getByRole("form", { name: "Angaben zur Rechnung" })).toHaveCount(0);
   });
 });
+
+test("Abgerufene Mails: eine abgelegte Ausgangsrechnung steht nicht als „Übersprungen“ da", async () => {
+  await mitDatenbank(async (sql) => {
+    // So protokolliert der Abruf eine Mail aus dem Ausgangsordner, deren PDF neu abgelegt wurde (inbox.ts, processMessage)
+    await sql`insert into inbox_messages (message_id, sender, subject, direction) values ('ausgang: <ml-1@shop.example>', 'rechnung@shop.example', 'Rechnung ML-1', 'ausgang')`;
+    await gehe(page, "/einstellungen?bereich=email");
+    const zeile = page.getByRole("region", { name: "Abgerufene Mails" }).getByRole("listitem").filter({ hasText: "Rechnung ML-1" });
+    await expect(zeile).toBeVisible();
+    await expect(zeile).not.toContainText("Übersprungen");
+  });
+});
