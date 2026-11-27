@@ -194,7 +194,7 @@ Aufheben legt eine Gegenzeile und eine Gegenbuchung an, statt etwas zu löschen.
 
 ## Dateiablage
 
-Belegdateien, Verträge der Dauerbelege, Lexoffice-Dateien, Archivexporte, Bescheide aus dem Postfach, zusätzliche Anhänge von Rechnungen und Angeboten samt Standardanhängen, Übermittlungsprotokolle vermerkter Voranmeldungen und Protokolle aus dem SV-Meldeportal liegen im Dateisystem unter `DOCUMENTS_DIR` (Standard `data/belege`, im Container ein Volume), adressiert über ihren SHA-256: `<DOCUMENTS_DIR>/ab/abcdef…`. Daraus folgt:
+Belegdateien, Verträge der Dauerbelege, Lexoffice-Dateien, Archivexporte, Bescheide aus dem Postfach, zusätzliche Anhänge von Rechnungen und Angeboten samt Standardanhängen, Übermittlungsprotokolle vermerkter Voranmeldungen, Protokolle aus dem SV-Meldeportal und Ausgangsrechnungen aus dem Postfach liegen im Dateisystem unter `DOCUMENTS_DIR` (Standard `data/belege`, im Container ein Volume), adressiert über ihren SHA-256: `<DOCUMENTS_DIR>/ab/abcdef…`. Daraus folgt:
 
 - Dieselbe Datei wird nur einmal abgelegt; ein zweites Hochladen findet den vorhandenen Beleg.
 - Gelöscht wird eine Datei erst, wenn kein Datensatz sie mehr nutzt (`fileInUse` in `server/db/file-in-use.ts`), etwa beim Löschen eines ungebuchten Belegs oder eines Anhangs im Rechnungsentwurf.
