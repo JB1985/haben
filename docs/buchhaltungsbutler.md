@@ -45,7 +45,12 @@ Erst ein fehlerfreier Testlauf lässt den Import zu.
 - die zugehörigen Original-PDFs, auch mehrere Dateien einer Buchung,
 - die unveränderten Originalexporte mit ihren SHA-256-Prüfsummen.
 
-Die Belege in `Belege.zip` tragen ihren Originalnamen, etwa `Rechnung-EU-2026011.pdf`. Haben ordnet sie über die Spalte „Beleg-Dateinamen“ des BB Standardexports zu, sonst über „Original-Dateiname“ im DATEV-Buchungsstapel. Eine Datei kann an mehreren Buchungen hängen und liegt nur einmal im ZIP; stehen mehrere Dateien in einem Feld, trennt Haben sie am Komma. Die `document.xml` im ZIP ist das Verzeichnis des DATEV-Belegtransfers und kein Beleg. Fehlt die Angabe, gilt das ältere Muster: `127.pdf` gehört zur Buchung 127, `97_1.pdf` und `97_2.pdf` zur Buchung 97. Buchungen ohne Beleg stehen nur im DATEV-Buchungsstapel.
+Die Belege in `Belege.zip` tragen ihren Originalnamen, etwa `Rechnung-EU-2026011.pdf`. Haben sucht die Dateien einer Buchung so:
+
+1. Die Namen stehen in der Spalte „Beleg-Dateinamen“ des BB Standardexports; ist sie leer, in „Original-Dateiname“ im DATEV-Buchungsstapel; sind beide leer, am Ende der Beleg-URL.
+2. Ergibt sich so kein Name oder fehlt eine der genannten Dateien im ZIP, gilt das ältere Muster: `127.pdf` gehört zur Buchung 127, `97_1.pdf` und `97_2.pdf` zur Buchung 97.
+
+Eine Datei kann an mehreren Buchungen hängen und liegt nur einmal im ZIP; stehen mehrere Dateien in einem Feld, trennt Haben sie am Komma. Die `document.xml` im ZIP ist das Verzeichnis des DATEV-Belegtransfers und kein Beleg. Buchungen ohne Beleg stehen nur im DATEV-Buchungsstapel.
 
 Ob ein Archivbeleg Rechnung, Gutschrift, Eingangsrechnung oder Eingangsgutschrift ist, ergibt sich aus Soll und Haben im konfigurierten Kontenrahmen: mit BU-Schlüssel aus der Steuerart (2 und 3 Umsatzsteuer, 8 und 9 Vorsteuer), sonst aus den Bilanz- und GuV-Posten des DATEV-Kontenrahmens. Der Steuersatz kommt aus der Beleginfo, sonst aus dem BU-Schlüssel oder dem Automatikkonto (etwa SKR03 8400, SKR04 4400). Geldtransit, Privates und Zahlungen über Personenkonten tragen keine Umsatzsteuer.
 
