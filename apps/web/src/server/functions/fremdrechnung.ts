@@ -56,6 +56,12 @@ function postfachOf(data: unknown): string | null {
   return typeof postfach === "string" && postfach ? postfach : null;
 }
 
+/** Der Eintrag im Postfach wird in derselben Transaktion erledigt, die bucht */
+function erledigen(actor: string, postfach: string | null) {
+  if (!postfach) return undefined;
+  return (tx: Parameters<typeof markOutgoingAdopted>[3], id: string) => markOutgoingAdopted(actor, postfach, id, tx);
+}
+
 /** Legt die geprüfte Rechnung an: Datei als Original, Angaben als JSON im Feld `rechnung` */
 export const adoptForeignInvoiceFn = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
@@ -73,8 +79,8 @@ export const adoptForeignInvoiceFn = createServerFn({ method: "POST" })
           mimeType: data.file.type,
         },
         kleinunternehmerStand,
+        erledigen(context.user.id, data.postfach),
       );
-      if (data.postfach) await markOutgoingAdopted(context.user.id, data.postfach, id);
       return { status: "final" as const, id };
     } catch (error) {
       if (!(error instanceof UmsatzgrenzeError)) throw error;
@@ -95,11 +101,10 @@ export const adoptForeignCancellationFn = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const bytes = new Uint8Array(await data.file.arrayBuffer());
     if (data.postfach) await assertOutgoingOpen(data.postfach);
-    const storno = await adoptForeignCancellationFile(context.user.id, data.parsed as ForeignCancellationInput, {
-      bytes,
-      filename: data.file.name,
-      mimeType: data.file.type,
-    });
-    if (data.postfach) await markOutgoingAdopted(context.user.id, data.postfach, storno.id);
-    return storno;
+    return adoptForeignCancellationFile(
+      context.user.id,
+      data.parsed as ForeignCancellationInput,
+      { bytes, filename: data.file.name, mimeType: data.file.type },
+      erledigen(context.user.id, data.postfach),
+    );
   });

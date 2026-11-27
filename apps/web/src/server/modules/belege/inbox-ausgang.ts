@@ -1,6 +1,6 @@
 import { and, asc, eq } from "drizzle-orm";
 import { withActor } from "../../db/actor.ts";
-import { db, schema } from "../../db/index.ts";
+import { db, schema, type Tx } from "../../db/index.ts";
 import { UserError } from "../../errors.ts";
 import { loadFile, sha256Of, sniff, storeFile } from "../../storage.ts";
 import { DocumentError, documentFileProblem } from "./documents.ts";
@@ -61,15 +61,19 @@ export async function assertOutgoingOpen(id: string): Promise<void> {
   await outgoingFile(id);
 }
 
-/** Nach dem Übernehmen: Eintrag erledigt, mit der entstandenen Rechnung */
-export async function markOutgoingAdopted(actor: string, id: string, invoiceId: string): Promise<void> {
-  const done = await withActor(actor, (tx) =>
+/**
+ * Beim Übernehmen: Eintrag erledigt, mit der entstandenen Rechnung. Mit `inTx` in der Transaktion, die bucht: Wartet der
+ * Eintrag nicht mehr (etwa gleichzeitig in einem zweiten Fenster übernommen oder verworfen) oder scheitert das Markieren,
+ * entsteht auch keine Rechnung.
+ */
+export async function markOutgoingAdopted(actor: string, id: string, invoiceId: string, inTx?: Tx): Promise<void> {
+  const mark = (tx: Tx) =>
     tx
       .update(schema.inboxOutgoing)
       .set({ status: "uebernommen", invoiceId })
       .where(and(eq(schema.inboxOutgoing.id, id), eq(schema.inboxOutgoing.status, "offen")))
-      .returning({ id: schema.inboxOutgoing.id }),
-  );
+      .returning({ id: schema.inboxOutgoing.id });
+  const done = inTx ? await mark(inTx) : await withActor(actor, mark);
   if (done.length === 0) throw new UserError("Diese Ausgangsrechnung wartet nicht mehr im Postfach.");
 }
 
