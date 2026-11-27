@@ -4,7 +4,7 @@ import { BuchhaltungsbutlerError } from "./types.ts";
 
 /**
  * Die Belegdateien je Buchungsnummer. Die Namen stehen in „Beleg-Dateinamen“ (BB Standardexport), sonst in „Original-Dateiname“
- * (DATEV) oder am Ende der Beleg-URL. Fehlen sie, gilt das ältere Muster <Buchungsnummer>.pdf.
+ * (DATEV) oder am Ende der Beleg-URL. Findet sich keine dieser Dateien, gilt das ältere Muster <Buchungsnummer>.pdf.
  */
 export function assignReceipts(rows: BuchhaltungsbutlerJoinedRow[], archive: ReceiptArchive): Map<string, BuchhaltungsbutlerFile[]> {
   const named = rows.map((row) => ({ id: row.info.bookingId, ...receiptNames(row, archive) }));
