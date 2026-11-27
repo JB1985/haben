@@ -58,7 +58,10 @@ export function PostfachAusgang() {
         }}
         onClose={() => p.setVerwerfen(null)}
       >
-        <p>Die Datei wird nicht übernommen und vom Abruf nicht wieder angeboten. Die Mail im Postfach bleibt unberührt.</p>
+        <p>
+          Die Datei wird nicht übernommen und vom Abruf nicht wieder angeboten. Am Postfach ändert das Verwerfen nichts; eine dort schon gelöschte Mail kommt
+          nicht zurück.
+        </p>
       </ConfirmDialog>
     </section>
   );
