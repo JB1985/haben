@@ -281,7 +281,9 @@ describe("parseDatevStammdaten: Köpfe von BuchhaltungsButler", () => {
 
 describe("parseDatevStammdaten: USt-IdNr., die ihr Länderkennzeichen selbst trägt (#1829)", () => {
   const lesen = (land: string, nummer: string) => {
-    const [zeile] = parsed(utf8(row({ Konto: "70001", "Name (Adressatentyp Unternehmen)": "Kennzeichen KG", "EU-Mitgliedstaat": land, "EU-UStId.": nummer }))).rows;
+    const [zeile] = parsed(
+      utf8(row({ Konto: "70001", "Name (Adressatentyp Unternehmen)": "Kennzeichen KG", "EU-Mitgliedstaat": land, "EU-UStId.": nummer })),
+    ).rows;
     return [zeile!.ustId, zeile!.errors];
   };
 

@@ -7,6 +7,9 @@ import {
   type PersonenkontoRolle,
   splitEmails,
   telefonProblem,
+  isValidGermanUstId,
+  ustIdAufbauProblem,
+  ustIdProblem,
 } from "@haben/core";
 import { ustIdImportProblem } from "./csv-import/contacts.ts";
 import { type CsvEncoding, type CsvEncodingChoice, decodeCsvBytes, MAX_IMPORT_BYTES, MAX_IMPORT_ROWS } from "./csv-import/read.ts";
@@ -90,8 +93,21 @@ function rawUstId(country: string, number: string): string {
   if (!number) return "";
   // BuchhaltungsButler schreibt bei manchen Partnern eine Zahl als „EU-Land“ (die ersten Ziffern der Nummer, etwa 19 zu 199405147):
   // Das ist keine USt-IdNr., also bleibt sie leer, statt die Zeile abzulehnen
-  if (country && !/^[A-Za-z]{2}$/.test(country)) return "";
-  return !country || number.toUpperCase().startsWith(country.toUpperCase()) ? number : `${country}${number}`;
+  if (country && !/^[A-Za-z]{2}$/.test(country)) return istUstId(number) ? number : "";
+  return !country || traegtKennzeichen(number, country) ? number : `${country}${number}`;
+}
+
+/** Eine USt-IdNr. für sich: deutsch mit richtiger Prüfziffer oder im Aufbau eines anderen Mitgliedstaats */
+function istUstId(number: string): boolean {
+  const ustId = normalizeUstId(number);
+  return isValidGermanUstId(ustId) || (!ustIdProblem(ustId, "L") && !ustIdAufbauProblem(ustId));
+}
+
+/** Griechenland steht als GR oder EL da; nordirische Nummern (XI) gehören zum Land GB */
+function traegtKennzeichen(number: string, country: string): boolean {
+  const ustId = normalizeUstId(number);
+  const land = normalizeUstId(country);
+  return ustId.startsWith(land) || (land === "GB" && ustId.startsWith("XI"));
 }
 
 const KONTO_FEHLER = (konto: string) =>

@@ -86,7 +86,7 @@ Die Namen folgen der [Mustervorlage für den Kontaktimport](https://help.lexware
 
 ## Kontakte aus DATEV
 
-Eine Datei „Debitoren/Kreditoren“ aus einem DATEV-Export (EXTF, Formatkategorie 16), etwa `EXTF_GP_Stamm_….csv` aus dem [Export von sevDesk](sevdesk.md#ohne-rest-api), wählst du wie jede andere Datei unter **Kontakte**. Haben erkennt sie an der Kopfzeile und liest die Spalten nach ihren Namen im DATEV-Format; zuzuordnen gibt es nichts. Auch der Stamm aus BuchhaltungsButler (`EXTF_DebKred_Stamm_….csv`) geht, obwohl er „Adressattyp“, „EU-Land“ und „EU-UStID“ schreibt. Steht bei einem Partner statt des Länderkürzels eine Zahl in „EU-Land“, wie BuchhaltungsButler es bei manchen schreibt, übernimmt Haben den Partner ohne USt-IdNr. Kodierung wie oben, Windows-1252 oder UTF-8.
+Eine Datei „Debitoren/Kreditoren“ aus einem DATEV-Export (EXTF, Formatkategorie 16), etwa `EXTF_GP_Stamm_….csv` aus dem [Export von sevDesk](sevdesk.md#ohne-rest-api), wählst du wie jede andere Datei unter **Kontakte**. Haben erkennt sie an der Kopfzeile und liest die Spalten nach ihren Namen im DATEV-Format; zuzuordnen gibt es nichts. Auch der Stamm aus BuchhaltungsButler (`EXTF_DebKred_Stamm_….csv`) geht, obwohl er „Adressattyp“, „EU-Land“ und „EU-UStID“ schreibt. Steht bei einem Partner statt des Länderkürzels eine Zahl in „EU-Land“, wie BuchhaltungsButler es bei manchen schreibt, übernimmt Haben den Partner ohne USt-IdNr., außer die Nummer ist mit eigenem Länderkennzeichen selbst eine. Kodierung wie oben, Windows-1252 oder UTF-8.
 
 | Spalte | In Haben |
 | --- | --- |
