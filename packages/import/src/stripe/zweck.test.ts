@@ -45,6 +45,19 @@ describe("metadatenZweck", () => {
     expect(metadatenZweck(txn({ reporting_category: "refund" }), ALLE)).toBeDefined();
   });
 
+  // Kategorien und ihre Typen: https://docs.stripe.com/reports/reporting-categories (charge_failure: payment_failure_refund,
+  // die später fehlgeschlagene SEPA- oder ACH-Zahlung; partial_capture_reversal: refund, nicht eingezogener Teil)
+  it("gilt auch für die fehlgeschlagene Zahlung und die Rückbuchung eines teilweisen Einzugs", () => {
+    for (const [reporting_category, type] of [
+      ["charge_failure", "payment_failure_refund"],
+      ["partial_capture_reversal", "refund"],
+    ] as const) {
+      const zeile = stripeStatement([txn({ reporting_category, type, amount: -11900, fee: 0, net: -11900 })], ["invoice_number"]).transactions[0]!;
+      expect(zeile.purpose).toBe("RE-2026-0117");
+      expect(zeile.hashPurpose).toBe(`${reporting_category} · txn_1`);
+    }
+  });
+
   it("zerschneidet beim Kürzen kein Zeichen aus zwei Codeeinheiten", () => {
     const zweck = metadatenZweck(txn({ metadata: { a: "x".repeat(499) + "\u{1F600}" } }), ["a"])!;
     expect(zweck.endsWith("\u{1F600}")).toBe(true);
