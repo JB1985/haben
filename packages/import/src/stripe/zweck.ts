@@ -5,7 +5,17 @@ import type { StripeBalanceTransaction } from "./client.ts";
 const MAX_LAENGE = 500;
 
 /** Nur hier stehen die Metadaten für eine Zahlung eines Kunden; Auszahlung, Gebühr, Transfer, Aufladung usw. bleiben wie bisher */
-const MIT_METADATEN = new Set(["charge", "payment", "refund", "payment_refund", "dispute", "dispute_reversal", "refund_failure"]);
+const MIT_METADATEN = new Set([
+  "charge",
+  "payment",
+  "charge_failure",
+  "partial_capture_reversal",
+  "refund",
+  "payment_refund",
+  "dispute",
+  "dispute_reversal",
+  "refund_failure",
+]);
 
 /**
  * Verwendungszweck aus den Metadaten der Zahlung: die Werte der gewählten Schlüssel in der gewählten Reihenfolge, durch
