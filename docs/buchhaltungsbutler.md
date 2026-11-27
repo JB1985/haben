@@ -48,7 +48,7 @@ Erst ein fehlerfreier Testlauf lässt den Import zu.
 Die Belege in `Belege.zip` tragen ihren Originalnamen, etwa `Rechnung-EU-2026011.pdf`. Haben sucht die Dateien einer Buchung so:
 
 1. Die Namen stehen in der Spalte „Beleg-Dateinamen“ des BB Standardexports; ist sie leer, in „Original-Dateiname“ im DATEV-Buchungsstapel; sind beide leer, am Ende der Beleg-URL.
-2. Findet Haben so keine einzige Datei, gilt das ältere Muster: `127.pdf` gehört zur Buchung 127, `97_1.pdf` und `97_2.pdf` zur Buchung 97. Eine Datei, die nur andere Buchungen beim Namen nennen, zählt dabei nicht. Endet die Beleg-URL auf eine von mehreren solchen Dateien, gehören alle zur Buchung.
+2. Findet Haben so keine einzige Datei, gilt das ältere Muster: `127.pdf` gehört zur Buchung 127, `97_1.pdf` und `97_2.pdf` zur Buchung 97. Eine Datei, die nur andere Buchungen beim Namen nennen, zählt dabei nicht. Sind beide Felder leer und endet die Beleg-URL auf eine von mehreren solchen Dateien, gehören ebenfalls alle zur Buchung.
 3. Fehlt nur ein Teil der genannten Dateien, ersetzt Haben nichts: Der Testlauf bricht mit dem Namen der fehlenden Datei ab, ebenso ohne passende Datei nach dem älteren Muster.
 
 Eine Datei kann an mehreren Buchungen hängen und liegt nur einmal im ZIP; stehen mehrere Dateien in einem Feld, trennt Haben sie am Komma. Die `document.xml` im ZIP ist das Verzeichnis des DATEV-Belegtransfers und kein Beleg. Buchungen ohne Beleg stehen nur im DATEV-Buchungsstapel.
