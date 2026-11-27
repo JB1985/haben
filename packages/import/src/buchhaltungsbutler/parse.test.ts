@@ -333,3 +333,45 @@ describe("BuchhaltungsButler: Belege über den Dateinamen", () => {
     expect(dateien(result)).toEqual([["document.xml"]]);
   });
 });
+
+// TDD-Review zu #1830; Namen und Werte erfunden
+describe("BuchhaltungsButler: Belegzuordnung, Randfälle", () => {
+  const pdf = (text: string) => new TextEncoder().encode(`%PDF-1.4\n${text}`);
+  const buchung = (id: string, extra: Partial<TestRow> = {}): TestRow => ({ id, number: `R-${id}`, debit: "4964", credit: "1203", ...extra });
+  const vorschau = (rows: TestRow[], zip: Record<string, Uint8Array>) => {
+    const parts = makeParts(rows, []);
+    parts[2] = { name: "Belege.zip", bytes: zipSync(zip) };
+    return previewBuchhaltungsbutlerExport(parts, "SKR03");
+  };
+  const dateien = (result: ReturnType<typeof vorschau>) => result.vouchers.map((v) => v.files.map((f) => f.filename));
+
+  it("hängt statt einer fehlenden Datei nicht die Datei einer anderen Buchung an, die wie die Buchungsnummer heißt", () => {
+    expect(() => vorschau([buchung("12", { names: "Lieferant.pdf" }), buchung("40", { names: "12.pdf" })], { "12.pdf": pdf("von 40") })).toThrow(
+      "Lieferant.pdf",
+    );
+  });
+
+  it("lässt eine fehlende Datei nicht wegfallen, wenn eine andere genannte da ist und eine Nummerndatei existiert", () => {
+    expect(() => vorschau([buchung("5", { names: "a.pdf, fehlt.pdf" }), buchung("6", { names: "a.pdf" })], { "a.pdf": pdf("a"), "5.pdf": pdf("5") })).toThrow(
+      "fehlt.pdf",
+    );
+  });
+
+  it("behält beide Dateien im älteren Muster, wenn die Beleg-URL auf eine davon endet", () => {
+    const result = vorschau([buchung("97", { url: "https://bb.example/belege/97_1.pdf" })], { "97_1.pdf": pdf("1"), "97_2.pdf": pdf("2") });
+    expect(dateien(result)).toEqual([["97_1.pdf", "97_2.pdf"]]);
+  });
+
+  it("findet in einem Feld mit mehreren Dateien auch den Namen mit Komma", () => {
+    const result = vorschau([buchung("1", { names: "Miete, Mai.pdf, b.pdf" })], { "Miete, Mai.pdf": pdf("m"), "b.pdf": pdf("b") });
+    expect(dateien(result)).toEqual([["Miete, Mai.pdf", "b.pdf"]]);
+  });
+
+  it("trennt zwei Beleg-URLs auch bei Komma mit Leerzeichen", () => {
+    const result = vorschau([buchung("1", { url: "https://bb.example/a.pdf, https://bb.example/b.pdf" }), buchung("2", { url: "https://bb.example/a.pdf" })], {
+      "a.pdf": pdf("a"),
+      "b.pdf": pdf("b"),
+    });
+    expect(dateien(result)).toEqual([["a.pdf", "b.pdf"], ["a.pdf"]]);
+  });
+});
