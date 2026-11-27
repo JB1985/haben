@@ -5,7 +5,7 @@ import type { LegacyVoucher } from "../lexoffice/map.ts";
 import { joinRows } from "./datev-info.ts";
 import { directionOf, type DirectionMapping } from "./direction.ts";
 import { readBbRows, readExportFiles, readReceiptFiles, type ExportPart } from "./export-files.ts";
-import { receiptsOf } from "./receipts.ts";
+import { assignReceipts } from "./receipts.ts";
 import type { BuchhaltungsbutlerJoinedRow, BuchhaltungsbutlerPreview, BuchhaltungsbutlerVoucher } from "./types.ts";
 import { BuchhaltungsbutlerError } from "./types.ts";
 
@@ -15,7 +15,7 @@ export function previewBuchhaltungsbutlerExport(parts: ExportPart[], skr: Konten
   const rows = joinRows(readBbRows(files.bb), stack.bookings);
   const archive = readReceiptFiles(files.receipts);
   const withReceipt = rows.filter((row) => row.info.url !== "");
-  const receiptsByBooking = new Map(withReceipt.map((row) => [row.info.bookingId, receiptsOf(row, archive)]));
+  const receiptsByBooking = assignReceipts(withReceipt, archive);
   const used = new Set([...receiptsByBooking.values()].flat());
   for (const file of archive.byName.values()) {
     if (!used.has(file)) throw new BuchhaltungsbutlerError(`Belege.zip: Datei „${file.filename}“ gehört zu keiner Buchung mit Beleg-URL im DATEV-Export.`);
