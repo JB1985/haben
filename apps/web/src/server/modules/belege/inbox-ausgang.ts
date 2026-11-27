@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { withActor } from "../../db/actor.ts";
 import { db, schema, type Tx } from "../../db/index.ts";
 import { UserError } from "../../errors.ts";
@@ -82,10 +82,12 @@ export async function markOutgoingAdopted(actor: string, id: string, invoiceId: 
 
 /** Verwerfen: Die Datei wird nicht übernommen und vom Abruf nicht wieder angeboten */
 export async function discardOutgoing(actor: string, id: string): Promise<void> {
-  await withActor(actor, (tx) =>
-    tx
+  await withActor(actor, async (tx) => {
+    // Erst die Kette im Audit-Log, dann die Zeile: Wer bucht, hält die Kette schon, wenn er den Eintrag markiert
+    await tx.execute(sql`select haben_lock_audit_chain()`);
+    await tx
       .update(schema.inboxOutgoing)
       .set({ status: "verworfen" })
-      .where(and(eq(schema.inboxOutgoing.id, id), eq(schema.inboxOutgoing.status, "offen"))),
-  );
+      .where(and(eq(schema.inboxOutgoing.id, id), eq(schema.inboxOutgoing.status, "offen")));
+  });
 }
