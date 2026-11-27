@@ -38,7 +38,10 @@ describe.skipIf(!testDatabaseUrl)("Stripe-Zweck aus Metadaten nach dem CSV-Expor
     sql = await setupTestDb();
     psp = await import("./index.ts");
     bank = await import("../bank/index.ts");
-    psp.setStripeClientFactory(() => ({ accountId: async () => "acct_meta", balanceTransactions: async () => [zahlung] }) as unknown as StripeClient);
+    psp.setStripeClientFactory(
+      () =>
+        ({ accountId: async () => "acct_meta", darfZahlungenLesen: async () => true, balanceTransactions: async () => [zahlung] }) as unknown as StripeClient,
+    );
   }, 60_000);
 
   afterAll(async () => {

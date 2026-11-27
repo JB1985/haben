@@ -25,7 +25,14 @@ describe.skipIf(!testDatabaseUrl)("Stripe-Zweck aus Metadaten und die Gebühren 
     sql = await setupTestDb();
     psp = await import("./index.ts");
     sammel = await import("../bank/sammelrechnung.ts");
-    psp.setStripeClientFactory(() => ({ accountId: async () => "acct_gebuehr", balanceTransactions: async () => bewegungen }) as unknown as StripeClient);
+    psp.setStripeClientFactory(
+      () =>
+        ({
+          accountId: async () => "acct_gebuehr",
+          darfZahlungenLesen: async () => true,
+          balanceTransactions: async () => bewegungen,
+        }) as unknown as StripeClient,
+    );
   }, 60_000);
 
   afterAll(async () => {
