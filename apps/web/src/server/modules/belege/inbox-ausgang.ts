@@ -14,6 +14,7 @@ export type OutgoingRow = typeof schema.inboxOutgoing.$inferSelect;
 
 /** Legt einen Anhang als wartende Ausgangsrechnung ab; dieselbe Datei ein zweites Mal, auch eine verworfene, ist ein Duplikat */
 export async function ablegenAusgang(
+  actor: string,
   file: { bytes: Uint8Array; filename: string },
   mail: { sender: string; subject: string; receivedAt: Date | null },
 ): Promise<{ duplicate: boolean }> {
@@ -25,19 +26,21 @@ export async function ablegenAusgang(
   const [known] = await db.select({ id: schema.inboxOutgoing.id }).from(schema.inboxOutgoing).where(eq(schema.inboxOutgoing.sha256, sha256));
   if (known) return { duplicate: true };
   await storeFile(file.bytes);
-  const inserted = await db
-    .insert(schema.inboxOutgoing)
-    .values({
-      sha256,
-      filename: file.filename.slice(0, 200),
-      mimeType: type.mimeType,
-      size: file.bytes.byteLength,
-      sender: mail.sender.slice(0, 500),
-      subject: mail.subject.slice(0, 500),
-      receivedAt: mail.receivedAt,
-    })
-    .onConflictDoNothing({ target: schema.inboxOutgoing.sha256 })
-    .returning({ id: schema.inboxOutgoing.id });
+  const inserted = await withActor(actor, (tx) =>
+    tx
+      .insert(schema.inboxOutgoing)
+      .values({
+        sha256,
+        filename: file.filename.slice(0, 200),
+        mimeType: type.mimeType,
+        size: file.bytes.byteLength,
+        sender: mail.sender.slice(0, 500),
+        subject: mail.subject.slice(0, 500),
+        receivedAt: mail.receivedAt,
+      })
+      .onConflictDoNothing({ target: schema.inboxOutgoing.sha256 })
+      .returning({ id: schema.inboxOutgoing.id }),
+  );
   return { duplicate: inserted.length === 0 };
 }
 

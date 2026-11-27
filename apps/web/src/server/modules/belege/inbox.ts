@@ -230,7 +230,7 @@ async function processMessage(
     try {
       if (direction === "ausgang") {
         // Kein Beleg: die Datei wartet in der Liste der Rechnungen, bis der Nutzer die Angaben geprüft hat
-        const result = await ablegenAusgang(file, { sender, subject, receivedAt: mail.date ?? null });
+        const result = await ablegenAusgang(actor, file, { sender, subject, receivedAt: mail.date ?? null });
         if (result.duplicate) duplicates++;
         else created++;
         continue;
