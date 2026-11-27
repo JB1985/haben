@@ -338,6 +338,8 @@ function AbsenderFeld({ settings }: { settings: Settings }) {
 /** Wie ein protokollierter Abruf in der Liste heißt: Belege, übersprungen oder fehlgeschlagen */
 function mailStatus(m: Data["last"][number]): { tone: StatusTone; text: string; detail?: string } {
   if (m.documentIds.length > 0) return { tone: "ok", text: `${m.documentIds.length} ${m.documentIds.length === 1 ? "Beleg" : "Belege"}` };
+  // Aus dem Ausgangsordner entsteht kein Beleg: ohne Dublette und ohne Grund wartet jede Datei auf „Übernehmen“
+  if (m.direction === "ausgang" && m.skipped.length === 0 && m.duplicates === 0) return { tone: "ok", text: "Zum Übernehmen" };
   const grund = m.skipped.join("; ");
   if (grund.startsWith("Verarbeitung fehlgeschlagen"))
     return { tone: "danger", text: "Fehlgeschlagen", detail: grund.replace(/^Verarbeitung fehlgeschlagen: /, "") };
