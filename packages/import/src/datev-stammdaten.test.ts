@@ -278,3 +278,26 @@ describe("parseDatevStammdaten: Köpfe von BuchhaltungsButler", () => {
     expect(zeile!.errors).toEqual(["USt-IdNr.: „DE12“ hat eine falsche Prüfziffer"]);
   });
 });
+
+describe("parseDatevStammdaten: USt-IdNr., die ihr Länderkennzeichen selbst trägt (#1829)", () => {
+  const lesen = (land: string, nummer: string) => {
+    const [zeile] = parsed(utf8(row({ Konto: "70001", "Name (Adressatentyp Unternehmen)": "Kennzeichen KG", "EU-Mitgliedstaat": land, "EU-UStId.": nummer }))).rows;
+    return [zeile!.ustId, zeile!.errors];
+  };
+
+  it.each([
+    ["19", "DE136695976", "DE136695976"],
+    ["13", "ATU12345678", "ATU12345678"],
+  ])("behält bei Zahl %s in „EU-Land“ die gültige Nummer %s", (land, nummer, erwartet) => {
+    expect(lesen(land, nummer)).toEqual([erwartet, []]);
+  });
+
+  it.each([
+    ["GR", "EL123456789", "EL123456789"],
+    ["gr", "el 123 456 789", "EL123456789"],
+    ["EL", "GR123456789", "EL123456789"],
+    ["GB", "XI123456789", "XI123456789"],
+  ])("setzt bei Land %s kein zweites Kennzeichen vor %s", (land, nummer, erwartet) => {
+    expect(lesen(land, nummer)).toEqual([erwartet, []]);
+  });
+});
