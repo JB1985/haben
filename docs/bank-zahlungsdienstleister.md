@@ -138,7 +138,9 @@ Statt des CSV-Exports „Balance history“ kann Haben die Umsätze von Stripe s
 **Metadaten im Verwendungszweck:** Legt dein Shop eigene Angaben (Metadaten) an der Zahlung ab, kannst du ihre Schlüssel im Feld **Metadaten im Verwendungszweck** eintragen, durch Komma getrennt, etwa `invoice_number` (beim Schritt **Zugang** oder später unter **⋯ › Bearbeiten …**).
 
 - Ihre Werte stehen dann in dieser Reihenfolge als Verwendungszweck neuer Umsätze, zum Beispiel „RE-2026-0117“. Ist darunter die Rechnungs- oder Bestellnummer, zählt sie bei den [Vorschlägen](bank.md#vorschläge) des Abgleichs.
+- Die Werte ersetzen den ganzen Zweck, auch die Beschreibung von Stripe, damit er genau aus dem Gewählten besteht; der Name der Gegenpartei bleibt.
 - Das gilt für Zahlungen, Erstattungen und Streitfälle; Erstattungen und Streitfälle bekommen die Werte der ursprünglichen Zahlung.
+- Haben liest die Metadaten der Zahlung (Charge). Was dein Shop nur an der Checkout-Sitzung setzt, kommt nicht an: Er muss es zusätzlich als `payment_intent_data.metadata` mitgeben, dann übernimmt Stripe es auf die Zahlung ([Stripe: Metadaten](https://docs.stripe.com/metadata)).
 - Ohne Eintrag oder ohne Wert gilt der Zweck des Exports, ebenso immer bei allen anderen Umsätzen, etwa Auszahlungen, Gebühren und Transfers.
 - Er gilt auch, wenn der Zweck aus den Metadaten mit „Gebühr“ begänne, denn daran erkennt Haben Gebühren.
 - Für [Dubletten](bank.md#dubletten) zählt weiter der Zweck des Exports, auch wenn der Umsatz die Metadaten zeigt.
