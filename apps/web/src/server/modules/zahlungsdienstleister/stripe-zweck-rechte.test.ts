@@ -12,6 +12,7 @@ describe.skipIf(!testDatabaseUrl)("Stripe-Zugang prüfen mit Metadaten ohne Lese
   let psp: typeof import("./index.ts");
   let sql: postgres.Sql;
   let darf = false;
+  let stoerung: Error | null = null;
   let gefragt = 0;
 
   beforeAll(async () => {
@@ -23,6 +24,7 @@ describe.skipIf(!testDatabaseUrl)("Stripe-Zugang prüfen mit Metadaten ohne Lese
           accountId: async () => "acct_rechte",
           darfZahlungenLesen: async () => {
             gefragt++;
+            if (stoerung) throw stoerung;
             return darf;
           },
         }) as unknown as StripeClient,
@@ -46,6 +48,16 @@ describe.skipIf(!testDatabaseUrl)("Stripe-Zugang prüfen mit Metadaten ohne Lese
   it("meldet nichts, wenn der Schlüssel Zahlungen lesen darf", async () => {
     darf = true;
     expect((await pruefen({ metadataKeys: "invoice_number" })).hinweise).toEqual([]);
+  });
+
+  it("nimmt den Schlüssel an, wenn sich nur das Leserecht nicht prüfen lässt, und sagt das", async () => {
+    stoerung = new Error("HTTP 500: Stripe ist gestört");
+    const ergebnis = await pruefen({ metadataKeys: "invoice_number" });
+    stoerung = null;
+    expect(ergebnis.accountId).toBe("acct_rechte");
+    expect(ergebnis.hinweise).toHaveLength(1);
+    expect(ergebnis.hinweise[0]).toContain("ließ sich nicht prüfen");
+    expect(ergebnis.hinweise[0]).toContain("HTTP 500: Stripe ist gestört");
   });
 
   it("fragt ohne gewählte Schlüssel nicht nach dem Recht", async () => {
