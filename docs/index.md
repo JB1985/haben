@@ -22,7 +22,7 @@ hide:
 Freiberufler, Selbstständige und kleine GmbHs. Mit Open-Source-Software, die du prüfen kannst, von der
 E-Rechnung bis zur Voranmeldung an ELSTER, ohne Abo.</p>
 
-[Rundgang starten](#rundgang){ .md-button .md-button--primary } [Installieren](installation.md){ .md-button } [Alle Funktionen im Detail](ueberblick.md){ .md-button }
+[Rundgang starten](#rundgang){ .md-button .md-button--primary } [Installieren](installation.md){ .md-button } [Ohne eigenen Server](gehostet.md#haben-gehostet){ .md-button } [Alle Funktionen im Detail](ueberblick.md){ .md-button }
 
 <p class="showcase-hinweis">Haben ist noch in der Beta: vor jedem Update ein Backup.</p>
 
@@ -235,6 +235,12 @@ Vorlagen für [Synology](synology.md) und [TrueNAS](truenas.md) ohne Kommandozei
 
 Wer nicht selbst installieren will, gibt Claude Code oder einem anderen Agenten SSH-Zugang zum Server
 und die [Installationsanleitung](installation.md).
+</div>
+<div markdown>
+**☁️ Oder gehostet**
+
+Kein eigener Server: Wir betreiben deine Instanz, mit Updates, Backups und ELSTER.
+[Haben gehostet](gehostet.md#haben-gehostet)
 </div>
 </div>
 

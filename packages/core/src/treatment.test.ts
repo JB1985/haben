@@ -1,10 +1,39 @@
 import { describe, expect, it } from "vitest";
-import { inEuVatArea, TAX_TREATMENTS, treatmentIssues, treatmentNote } from "./treatment.ts";
+import { inEuVatArea, kundenUstIdSperre, TAX_TREATMENTS, treatmentIssues, treatmentNote } from "./treatment.ts";
 
 describe("treatmentIssues", () => {
   it("Reverse Charge braucht beide USt-IdNrn. und einen Kunden im Ausland", () => {
     expect(treatmentIssues("reverse_charge", { rates: [0], sellerUstId: "DE123456789", buyerUstId: "ATU12345678", buyerCountry: "AT" })).toEqual([]);
-    expect(treatmentIssues("reverse_charge", { rates: [1900], buyerCountry: "DE" })).toHaveLength(4);
+    expect(treatmentIssues("reverse_charge", { rates: [1900], buyerCountry: "DE" })).toEqual([
+      "Bei der gewählten Umsatzsteuer müssen alle Positionen 0 % haben",
+      "Reverse Charge braucht deine USt-IdNr. in den Firmendaten",
+      "Reverse Charge braucht die USt-IdNr. des Kunden",
+      "Reverse Charge gilt nur für Kunden im EU-Ausland",
+    ]);
+  });
+
+  // #1433: Die Leistung geht mit Art S in die ZM; was ERiC dort abweist oder der Aufbau des Landes nicht hergibt, sperrt schon
+  // das Festschreiben, solange sich die Nummer noch berichtigen lässt
+  it("Reverse Charge nur mit einer USt-IdNr. im Aufbau des Landes und nach den Regeln der ZM (#1433)", () => {
+    const rechnung = { rates: [0], sellerUstId: "DE123456789" };
+    expect(treatmentIssues("reverse_charge", { ...rechnung, buyerUstId: "ATU1234", buyerCountry: "AT" })).toEqual([
+      "ATU1234: eine USt-IdNr. aus Österreich hat nach AT ein U und acht Ziffern",
+    ]);
+    expect(treatmentIssues("reverse_charge", { ...rechnung, buyerUstId: "atu 1234 5678", buyerCountry: "AT" })).toEqual([]);
+    expect(treatmentIssues("reverse_charge", { ...rechnung, buyerUstId: "CHE-123.456.789 MWST", buyerCountry: "CH" })).toEqual([
+      "CHE123456789MWST: kein Länderkennzeichen eines anderen EU-Mitgliedstaats",
+    ]);
+    expect(treatmentIssues("reverse_charge", { ...rechnung, buyerUstId: "XI123456789", buyerCountry: "GB" })).toEqual([
+      "XI123456789: nordirische USt-IdNr. nur bei Lieferungen, nicht bei sonstigen Leistungen",
+    ]);
+  });
+
+  it("Storno und Korrektur einer Rechnung mit Reverse Charge auch mit einer solchen USt-IdNr. (#1433)", () => {
+    // Vor #1433 ließ sich jede Nummer festschreiben; die Rechnung muss sich zurücknehmen lassen
+    const gutschrift = { rates: [0], sellerUstId: "DE123456789", correctsInvoice: true };
+    expect(treatmentIssues("reverse_charge", { ...gutschrift, buyerUstId: "ATU1234", buyerCountry: "AT" })).toEqual([]);
+    expect(treatmentIssues("reverse_charge", { ...gutschrift, buyerUstId: "CHE123456789MWST", buyerCountry: "CH" })).toEqual([]);
+    expect(treatmentIssues("reverse_charge", { ...gutschrift, buyerUstId: "XI123456789", buyerCountry: "GB" })).toEqual([]);
   });
 
   // § 1 Abs. 2a UStG: Monaco gilt als Gebiet Frankreichs; Unternehmen dort haben eine französische USt-IdNr.
@@ -79,5 +108,30 @@ describe("treatmentNote", () => {
     expect(treatmentNote("regulaer")).toBeNull();
     expect(treatmentNote("kleinunternehmer")).toContain("§ 19 UStG");
     expect(treatmentNote("steuerfrei", " Steuerfrei nach § 4 Nr. 21 UStG ")).toBe("Steuerfrei nach § 4 Nr. 21 UStG");
+  });
+});
+
+describe("kundenUstIdSperre", () => {
+  it("sperrt bei Reverse Charge und Lieferung dieselben Nummern wie treatmentIssues", () => {
+    for (const treatment of ["reverse_charge", "ig_lieferung"] as const) {
+      for (const ustId of ["ATU1234", "DE123456788", "CHE123456789", "XI123456789", "ATU12345678"]) {
+        const issues = treatmentIssues(treatment, { rates: [0], sellerUstId: "DE123456788", buyerUstId: ustId, buyerCountry: "AT" });
+        const sperre = kundenUstIdSperre(treatment, ustId);
+        expect(sperre === null ? [] : [sperre], `${treatment} ${ustId}`).toEqual(issues.filter((i) => i.startsWith(ustId)));
+      }
+    }
+  });
+
+  it("nennt den Aufbau, Nordirland nur bei einer Leistung", () => {
+    expect(kundenUstIdSperre("reverse_charge", "ATU1234")).toBe("ATU1234: eine USt-IdNr. aus Österreich hat nach AT ein U und acht Ziffern");
+    expect(kundenUstIdSperre("reverse_charge", "XI123456789")).toMatch(/^XI123456789: nordirische/);
+    expect(kundenUstIdSperre("ig_lieferung", "XI123456789")).toBeNull();
+    expect(kundenUstIdSperre("reverse_charge", "ATU12345678")).toBeNull();
+  });
+
+  it("Storno und Korrektur: bei Reverse Charge keine Sperre, bei der Lieferung ohne den Aufbau", () => {
+    expect(kundenUstIdSperre("reverse_charge", "CHE123456789", true)).toBeNull();
+    expect(kundenUstIdSperre("ig_lieferung", "ATU1234", true)).toBeNull();
+    expect(kundenUstIdSperre("ig_lieferung", "CHE123456789", true)).toMatch(/kein Länderkennzeichen/);
   });
 });

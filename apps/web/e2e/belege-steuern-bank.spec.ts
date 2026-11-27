@@ -5,7 +5,17 @@ import { expect, type Page, test } from "@playwright/test";
 import postgres from "postgres";
 import { day, YEAR } from "./daten.ts";
 import { type Durchlauf, databaseUrlFuer } from "./durchlaeufe.ts";
-import { bestaetigen, dkb, durchlaufSeite, gehe, lieferantWaehlen, neuenLieferantenOeffnen, ohneAxeVerstoesse, axeVerstoesse } from "./einrichtung.ts";
+import {
+  bestaetigen,
+  kontoVerbinden,
+  dkb,
+  durchlaufSeite,
+  gehe,
+  lieferantWaehlen,
+  neuenLieferantenOeffnen,
+  ohneAxeVerstoesse,
+  axeVerstoesse,
+} from "./einrichtung.ts";
 import { LAPTOP } from "./kopfzeile.ts";
 import { abzugEinspielen } from "./abzug.ts";
 import { receiptJpeg } from "./belegbild.ts";
@@ -224,18 +234,38 @@ test("Anlage übernehmen: degressive AfA mit Höchstsatz, Restbuchwert geprüft,
   await form.getByLabel("Restbuchwert zum Stichtag (€)").fill("34.000,00");
   await form.getByRole("button", { name: "Anlage übernehmen" }).click();
   await page.waitForURL(/\/anlagen\/[0-9a-f-]{36}$/);
-  const plan = page.getByRole("region", { name: "Abschreibungsplan" });
+  const plan = page.getByRole("region", { name: "Abschreibungsplan", exact: true });
   await expect(plan).toContainText("Degressiv mit Wechsel zur linearen (§ 7 Abs. 2 EStG), 10 Jahre, 20 %");
   await expect(plan.locator(".table-row", { hasText: /^2026/ })).toContainText("6.800,00");
 
   // Wechsel zur linearen AfA ab 2027: 27.200 € über die Restnutzungsdauer von 87 Monaten
   const angaben = page.getByRole("region", { name: "Angaben" });
   await angaben.getByLabel("Linear ab Jahr (optional)").fill("2027");
-  await angaben.getByRole("button", { name: "Speichern" }).click();
+  await angaben.getByRole("button", { name: "Speichern", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "Gespeichert." })).toBeVisible();
   await expect(plan).toContainText("linear ab 2027");
   await expect(plan.locator(".table-row", { hasText: /^2027/ })).toContainText("3.751,72");
   await expect(angaben.getByLabel("Erinnerungswert 1 € bis zum Abgang stehen lassen")).not.toBeChecked();
+
+  const sonderAfA = angaben.getByRole("button", { name: "Sonder-AfA speichern" });
+  await expect(sonderAfA).toHaveCount(1);
+  const betrag = angaben.getByRole("textbox", { name: "2026 (€)", exact: true });
+  await betrag.fill("5000");
+  const bestaetigung = angaben.getByRole("checkbox", { name: /maßgebliche Vorjahresgewinn/ });
+  await sonderAfA.click();
+  await expect(bestaetigung).toBeFocused();
+  await expect(bestaetigung).toHaveAccessibleDescription("Bestätige die Voraussetzungen für die Sonder-AfA.");
+  await bestaetigung.check();
+  await sonderAfA.click();
+  await expect(page.getByRole("status").filter({ hasText: "Sonder-AfA gespeichert." })).toBeVisible();
+  await expect(plan.locator(".table-row", { hasText: /^2026/ })).toContainText("5.000,00 Sonder-AfA");
+  await page.reload();
+  await expect(betrag).toHaveValue("5.000,00");
+  await expect(plan.locator(".table-row", { hasText: /^2026/ })).toContainText("5.000,00 Sonder-AfA");
+  await betrag.fill("0");
+  await sonderAfA.click();
+  await expect(betrag).toHaveValue("0,00");
+  await expect(plan.locator(".table-row", { hasText: /^2026/ })).not.toContainText("Sonder-AfA");
 });
 
 test("Beleg als Anlagegut: Wechsel von Fahrzeug zu Sonstige Transportmittel lässt die sechs Jahre für Pkw nicht stehen (#312)", async ({ browser }) => {
@@ -277,7 +307,7 @@ test("Anlage anlegen: Erinnerungswert angehakt, dann zu Computer gewechselt, wir
   await form.getByLabel("Restbuchwert zum Stichtag (€)").fill("0,00");
   await form.getByRole("button", { name: "Anlage übernehmen" }).click();
   await page.waitForURL(/\/anlagen\/[0-9a-f-]{36}$/);
-  await expect(page.getByRole("region", { name: "Abschreibungsplan" })).not.toContainText("Erinnerungswert");
+  await expect(page.getByRole("region", { name: "Abschreibungsplan", exact: true })).not.toContainText("Erinnerungswert");
 });
 
 test("Anlage: Eingaben direkt nach dem Speichern bleiben erhalten (#1793)", async () => {
@@ -648,6 +678,23 @@ test("Direkt buchen auf eine Kategorie: Zahlung eines Privatkunden mit 19 %, Aus
   await expect(panel.getByText("Direkt: Erlöse 19 %")).toBeVisible();
 });
 
+test("Von der Zuordnung zur Buchung im Journal und über die Herkunft „Bank“ zurück zum Umsatz (#1855)", async () => {
+  // Gewählt ist noch die Zahlung von Erika Beispiel aus dem Test davor
+  const panel = page.getByRole("complementary", { name: "Zuordnung" });
+  await expect(panel.getByText("Direkt: Erlöse 19 %")).toBeVisible();
+  await panel.getByRole("link", { name: /^Buchung vom / }).click();
+  await page.waitForURL(/\/buchungen\?.*#buchung-/);
+  const zeile = page.locator('tr[aria-current="true"]');
+  await expect(zeile).toContainText("Erika Beispiel");
+  await expect(zeile).toBeFocused();
+  // Bisher führte die Herkunft nur auf die Seite Bank; jetzt öffnet sie genau diesen Umsatz
+  await zeile.getByRole("link", { name: "Bank", exact: true }).click();
+  await page.waitForURL(/\/bank\?.*umsatz=/);
+  await page.waitForLoadState("networkidle");
+  await expect(panel.getByRole("heading", { name: "Erika Beispiel" })).toBeVisible();
+  await expect(panel.getByText("Direkt: Erlöse 19 %")).toBeVisible();
+});
+
 test("Direkt buchen als nicht steuerbare Einnahme: ohne Steuersatz, auch nach Wechsel von Erlöse 19 % (#1131)", async () => {
   const zeile = (name: string, zweck: string, betrag: string) =>
     [dkb(day(0)), dkb(day(0)), "Gebucht", betrag.startsWith("-") ? "Max Mustermann" : name, betrag.startsWith("-") ? name : "Max Mustermann", zweck]
@@ -991,7 +1038,7 @@ test("Sammelrechnung des Dienstleisters: an der Gebührenzeile als bester Treffe
   await expect(page.locator(".page-head").getByText("Gebucht", { exact: true })).toBeVisible();
 
   await go("/bank");
-  await page.getByRole("button", { name: "Konto hinzufügen" }).click();
+  await kontoVerbinden(page, "Konto ohne Abruf anlegen");
   const neuesKonto = page.locator("form", { has: page.getByRole("button", { name: "Konto anlegen" }) });
   await neuesKonto.getByLabel("Art", { exact: true }).selectOption("provider");
   await neuesKonto.getByLabel("Dienstleister", { exact: true }).selectOption("etsy");
@@ -1010,6 +1057,10 @@ test("Sammelrechnung des Dienstleisters: an der Gebührenzeile als bester Treffe
   await page
     .locator('input[type=file][aria-label="Kontoauszugsdateien"]')
     .setInputFiles([{ name: "etsy.csv", mimeType: "text/csv", buffer: Buffer.from(csv) }]);
+  // Der Export nennt kein Konto: die Meldung fragt danach, vorgewählt ist das eben angelegte (#1951)
+  const nachfrage = page.getByRole("form", { name: "Konto für etsy.csv" });
+  await expect(nachfrage.getByLabel("Konto").locator("option:checked")).toHaveText("Etsy Shop", { timeout: 30_000 });
+  await nachfrage.getByRole("button", { name: "Importieren" }).click();
   await expect(page.getByText(/6 neue Umsätze für Etsy Shop/)).toBeVisible({ timeout: 30_000 });
 
   await go("/bank?filter=alle&suche=Etsy");
@@ -1030,14 +1081,13 @@ test("Unbekannte Bank-CSV: Spalten zuordnen, importieren, der nächste Export ge
   // Erfundene Bank mit Kopfblock, Soll und Haben in eigenen Spalten und dem Kontostand in der letzten Zeile
   const datei = readFileSync(new URL("../../../packages/import/test-fixtures/unbekannte-bank-soll-haben.csv", import.meta.url));
   await go("/bank");
-  await page.getByRole("button", { name: "Konto hinzufügen" }).click();
+  await kontoVerbinden(page, "Konto ohne Abruf anlegen");
   const neuesKonto = page.locator("form", { has: page.getByRole("button", { name: "Konto anlegen" }) });
   await neuesKonto.getByLabel("Name", { exact: true }).fill("Konto ohne Format");
   await neuesKonto.getByLabel("IBAN", { exact: true }).fill("DE75 5121 0800 1245 1261 99");
   await neuesKonto.getByRole("button", { name: "Konto anlegen" }).click();
   await expect(page.getByText("Konto angelegt.")).toBeVisible();
-  // Das Konto nicht vorwählen: die Datei nennt keine IBAN, gewählt wird es in der Zuordnung
-  await page.getByLabel("Konto", { exact: true }).selectOption("");
+  // „Datei importieren“ im Kopf nimmt das Konto aus der Datei; sie nennt keine IBAN, gewählt wird es in der Zuordnung
   const upload = page.locator('input[type=file][aria-label="Kontoauszugsdateien"]');
   await upload.setInputFiles([{ name: "umsaetze.csv", mimeType: "text/csv", buffer: datei }]);
   await expect(page.getByText("umsaetze.csv: Haben kennt diese Bank nicht. Ordne die Spalten einmal selbst zu.")).toBeVisible({ timeout: 30_000 });
@@ -1056,7 +1106,9 @@ test("Unbekannte Bank-CSV: Spalten zuordnen, importieren, der nächste Export ge
   await expect(dialog.getByLabel("Kopfzeile")).toHaveValue("2");
   expect(await axeVerstoesse(page)).toEqual([]);
 
-  // Ohne Konto meldet das Feld den Fehler und bekommt den Fokus
+  // Vorgewählt ist das eben angelegte, gewählte Konto (#1951); ohne Konto meldet das Feld den Fehler und bekommt den Fokus
+  await expect(dialog.getByLabel("Konto", { exact: true }).locator("option:checked")).toHaveText("Konto ohne Format");
+  await dialog.getByLabel("Konto", { exact: true }).selectOption("");
   await dialog.getByRole("button", { name: "4 Umsätze importieren" }).click();
   await expect(dialog.getByLabel("Konto", { exact: true })).toBeFocused();
   await expect(dialog.getByText("Wähle das Konto, zu dem die Datei gehört.")).toBeVisible();
@@ -1071,8 +1123,13 @@ test("Unbekannte Bank-CSV: Spalten zuordnen, importieren, der nächste Export ge
   await expect(page.getByText("umsaetze.csv: 4 neue Umsätze für Konto ohne Format. Spaltenzuordnung für Konto ohne Format gespeichert.")).toBeVisible();
   await expect(page.getByText(/Zeile 9 nicht übernommen: Buchungstag „Kontostand“ ist kein Datum/)).toBeVisible();
 
-  // Der nächste Export mit derselben Kopfzeile: ohne Dialog, ohne Dubletten
-  await upload.setInputFiles([{ name: "umsaetze-november.csv", mimeType: "text/csv", buffer: datei }]);
+  // Der nächste Export mit derselben Kopfzeile, über „Datei importieren“ des gewählten Kontos: ohne Dialog, ohne Dubletten.
+  // Die Datei nennt keine IBAN; erst das Konto bringt die gespeicherte Zuordnung mit (#1951)
+  const [auswahl] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.getByRole("region", { name: "Umsätze" }).getByRole("button", { name: "Datei importieren" }).click(),
+  ]);
+  await auswahl.setFiles([{ name: "umsaetze-november.csv", mimeType: "text/csv", buffer: datei }]);
   await expect(page.getByText("umsaetze-november.csv: 0 neue Umsätze für Konto ohne Format, 4 schon vorhanden.")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("button", { name: "Spalten zuordnen" })).toHaveCount(0);
 
@@ -1094,6 +1151,76 @@ test("Unbekannte Bank-CSV: Spalten zuordnen, importieren, der nächste Export ge
 
 test("Seiten mit den Daten dieses Abschnitts ohne axe-Verstöße", async () => {
   await ohneAxeVerstoesse(page, ["/anlagen", "/darlehen", "/bank", "/ueberweisungen", ibanBeleg]);
+});
+
+test("Wiederzuordnung: je Teil die aufgehobene Zuordnung wählen (#1454)", async () => {
+  const buchungstag = dkb(day(-18));
+  const aufhebungen = [day(-8), day(-5)];
+  const zweck = "Zahlung mit zwei aufgehobenen Teilzuordnungen";
+  const csv = [
+    '"Girokonto";"DE45 1203 0000 1234 5678 90"',
+    '""',
+    '"Buchungsdatum";"Wertstellung";"Status";"Zahlungspflichtige*r";"Zahlungsempfänger*in";"Verwendungszweck";"Umsatztyp";"IBAN";"Betrag (€)";"Gläubiger-ID";"Mandatsreferenz";"Kundenreferenz"',
+    [buchungstag, buchungstag, "Gebucht", "Firma Musterkonto", "Mustermann IT", zweck, "Eingang", "", "238,00", "", "", ""]
+      .map((wert) => `"${wert}"`)
+      .join(";"),
+  ].join("\n");
+  await go("/bank");
+  await page.getByLabel("Kontoauszugsdateien").setInputFiles({ name: "wiederzuordnung.csv", mimeType: "text/csv", buffer: Buffer.from(`\ufeff${csv}`) });
+  await expect(page.getByText(/wiederzuordnung\.csv: 1 neue Umsätze/)).toBeVisible();
+  const sql = postgres(databaseUrlFuer(DURCHLAUF), { max: 1 });
+  try {
+    const umsaetze = await sql<{ id: string; bank_account_id: string }[]>`
+      select id, bank_account_id from bank_transactions where purpose = ${zweck}`;
+    expect(umsaetze).toHaveLength(1);
+    const { id, bank_account_id } = umsaetze[0]!;
+    await go(`/bank?${new URLSearchParams({ filter: "alle", konto: bank_account_id, umsatz: id, suche: zweck })}`);
+    const panel = page.getByRole("complementary", { name: "Zuordnung" });
+    for (const anzahl of [1, 2]) {
+      const direkt = panel.getByRole("button", { name: "Direkt buchen", exact: true });
+      if (await direkt.isVisible()) await direkt.click();
+      await panel.getByLabel("Buchen als").selectOption("zinsertrag");
+      await panel.getByLabel("Betrag", { exact: true }).fill("119,00");
+      await panel.getByRole("button", { name: "Buchen", exact: true }).click();
+      await expect(panel.getByRole("button", { name: "Aufheben", exact: true })).toHaveCount(anzahl);
+    }
+    for (const [i, datum] of aufhebungen.entries()) {
+      await panel.getByRole("button", { name: "Aufheben", exact: true }).first().click();
+      const dialog = page.getByRole("dialog", { name: "Zuordnung aufheben?" });
+      await dialog.getByLabel("Tag der Aufhebung").fill(datum);
+      await dialog.getByRole("button", { name: "Zuordnung aufheben" }).click();
+      await expect(panel.getByText("aufgehoben", { exact: true })).toHaveCount(i + 1);
+    }
+
+    await panel.getByRole("button", { name: "Aufteilen", exact: true }).click();
+    const form = panel.getByRole("form", { name: "Umsatz aufteilen" });
+    for (const teil of [1, 2]) {
+      const zeile = form.locator(".split-row").nth(teil - 1);
+      await zeile.getByLabel(`Teil ${teil}`, { exact: true }).selectOption("zinsertrag");
+      await zeile.getByLabel("Betrag", { exact: true }).fill("119,00");
+    }
+    const bezuege = form.getByRole("combobox", { name: "Aufgehobene Zuordnung" });
+    await expect(bezuege).toHaveCount(2);
+    await form.getByRole("button", { name: "Aufteilen und buchen" }).click();
+    await expect(bezuege.first()).toBeFocused();
+    await expect(bezuege.first()).toHaveAccessibleDescription("Wähle die aufgehobene Zuordnung, zu der der Betrag gehört.");
+    for (const [i, datum] of aufhebungen.entries()) {
+      const aufgehobenAm = datum.split("-").reverse().join(".");
+      const auswahl = bezuege.nth(i);
+      const option = auswahl.getByRole("option", { name: new RegExp(aufgehobenAm.replaceAll(".", "\\.")) });
+      await expect(option).toHaveText(`Zinserträge · ${aufgehobenAm} · 119,00 €`);
+      await auswahl.selectOption((await option.getAttribute("value")) ?? "");
+    }
+    await form.getByRole("button", { name: "Aufteilen und buchen" }).click();
+    await expect(panel.getByRole("button", { name: "Aufteilung aufheben", exact: true })).toBeVisible();
+    const zeilen = await sql`select a.date::text as wirksam, r.date::text as aufhebung, j.date::text as journal
+      from allocations a join allocations r on r.reverses_id = a.reassigns_id
+      join journal_entries j on j.source_id = a.id and j.source_type = 'allocation'
+      where a.transaction_id = ${id} order by a.date`;
+    expect(zeilen).toEqual(aufhebungen.map((datum) => ({ wirksam: datum, aufhebung: datum, journal: datum })));
+  } finally {
+    await sql.end();
+  }
 });
 
 test("Keine Fehler im Browser", async () => {

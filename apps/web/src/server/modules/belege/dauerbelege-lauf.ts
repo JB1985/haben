@@ -9,7 +9,7 @@ import { and, eq, lte } from "drizzle-orm";
 import { z } from "zod";
 import { withActor } from "../../db/actor.ts";
 import { db, schema, type Tx } from "../../db/index.ts";
-import { INTERNAL_ERROR, userMessage } from "../../errors.ts";
+import { reportInternalError, userMessage } from "../../errors.ts";
 import { allocateIn } from "../bank/index.ts";
 import { DauerbelegError, type Dauerbeleg } from "./dauerbelege.ts";
 import { bookDocumentIn } from "./documents.ts";
@@ -38,7 +38,11 @@ function noteFor(vorlage: Dauerbeleg, termin: string): string {
   const { filename, sha256 } = contractOf(vorlage);
   const lines = [
     `Aus Dauerbeleg „${vorlage.name}“, Termin ${deutsch(termin)}. Beleg: ${filename} (SHA-256 ${sha256.slice(0, 12)}…).`,
-    vorlage.taxShown ? "" : "Das Dokument weist keine Umsatzsteuer aus; ohne Steuerausweis keine Vorsteuer.",
+    vorlage.kleinbetrag
+      ? "Kleinbetragsrechnung (§ 33 UStDV): Der Vertrag nennt Endbetrag und Steuersatz, mit dem Zahlungsbeleg die Rechnung über diesen Termin; Vorsteuer aus der Aufteilung (§ 35 Abs. 1 UStDV)."
+      : vorlage.taxShown
+        ? ""
+        : "Das Dokument weist keine Umsatzsteuer aus; ohne Steuerausweis keine Vorsteuer.",
     vorlage.note,
   ];
   return lines.filter(Boolean).join("\n");
@@ -99,8 +103,7 @@ async function runTermin(id: string, heute: string): Promise<{ created: boolean 
 
 function describe(error: unknown): string {
   const message = userMessage(error);
-  if (message === undefined) console.error("Dauerbeleg:", error);
-  return message ?? INTERNAL_ERROR;
+  return message ?? reportInternalError("Dauerbeleg", error);
 }
 
 /** Legt für alle fälligen Termine Belege an; verpasste Termine mit ihrem Datum */

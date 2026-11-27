@@ -3,9 +3,9 @@ import { waehleKategorie } from "./kategorie.ts";
 import { filePickerPruefen } from "./dateiauswahl.ts";
 import AxeBuilder from "@axe-core/playwright";
 import { readFile } from "node:fs/promises";
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 import { FORM01 } from "@haben/core";
-import { bestaetigen, fragenUeberspringen, faktenZeigen, kundeWaehlen } from "./einrichtung.ts";
+import { bestaetigen, fragenUeberspringen, faktenZeigen, kundeWaehlen, ueberSchnellsuche } from "./einrichtung.ts";
 import { currentDay, currentYear, vorschauAnheften } from "./daten.ts";
 import { anzahlungsbilanzPruefen } from "./anzahlung-bilanz.ts";
 
@@ -94,6 +94,55 @@ test("Manuelle Buchung: Konten nach Namen suchen, auswählen und leeren", async 
   await kontensuchePruefen(page);
 });
 
+test("Manuelle Buchung: Fehler einer Zeile am Feld, was die ganze Buchung betrifft erst danach unter der Tabelle (#1277)", async () => {
+  await go("/buchungen/neu");
+  const form = page.getByRole("form", { name: "Manuelle Buchung" });
+  await form.getByLabel("Buchungstext").fill("Einlage des Gesellschafters");
+  await form.getByLabel("Konto Zeile 1").fill("12");
+  await form.getByLabel("Soll Zeile 1").fill("100,00");
+  await form.getByLabel("Konto Zeile 2").fill("2900");
+  await form.getByLabel("Haben Zeile 2").fill("zehn");
+  // Vor dem ersten „Buchen“ sagt die Liste schon, was fehlt
+  const liste = form.getByRole("status", { name: "Noch nicht buchbar" });
+  await expect(liste).toContainText("Zeile 1: Konto hat vier Ziffern");
+  await form.getByRole("button", { name: "Buchen" }).click();
+  await expect(form.getByLabel("Konto Zeile 1")).toBeFocused();
+  await expect(form.getByLabel("Konto Zeile 1")).toHaveAccessibleDescription("Konto hat vier Ziffern.");
+  await expect(form.getByLabel("Haben Zeile 2")).toHaveAccessibleDescription("Trag den Betrag im Haben ein, etwa 100,00, oder lass das Feld leer.");
+  await expect(form.getByLabel("Soll Zeile 1")).not.toHaveAttribute("aria-invalid");
+  // „Soll und Haben sind nicht gleich“ wäre hier nur eine Folge des Betrags
+  await expect(liste).toHaveCount(0);
+
+  await form.getByLabel("Konto Zeile 1").fill("3510");
+  await form.getByLabel("Haben Zeile 2").fill("50,00");
+  await expect(form.getByLabel("Haben Zeile 2")).not.toHaveAttribute("aria-invalid");
+  await form.getByRole("button", { name: "Buchen" }).click();
+  await expect(form.getByLabel("Konto Zeile 1")).toBeFocused();
+  await expect(form.getByLabel("Konto Zeile 1")).toHaveAccessibleDescription("Soll und Haben sind nicht gleich.");
+  await expect(liste).toHaveText("Soll und Haben sind nicht gleich.");
+  await expect(page).toHaveURL(/\/buchungen\/neu$/);
+});
+
+test("Manuelle Buchung: Nach einem gescheiterten Buchen nennt das Formular einen neuen Fehler einer Zeile (Review #1950)", async () => {
+  await go("/buchungen/neu");
+  const form = page.getByRole("form", { name: "Manuelle Buchung" });
+  await form.getByLabel("Buchungstext").fill("Einlage, Verbindung bricht ab");
+  await form.getByLabel("Konto Zeile 1").fill("3510");
+  await form.getByLabel("Soll Zeile 1").fill("100,00");
+  await form.getByLabel("Konto Zeile 2").fill("2900");
+  await form.getByLabel("Haben Zeile 2").fill("100,00");
+  // Die Prüfung im Formular geht durch, der Server antwortet nicht
+  const abbrechen = (route: Route) => (route.request().method() === "POST" ? route.abort() : route.continue());
+  await page.route(/_serverFn/, abbrechen);
+  await form.getByRole("button", { name: "Buchen" }).click();
+  await expect(form.locator(".banner-danger")).toBeVisible();
+  await page.unroute(/_serverFn/, abbrechen);
+  await expect(page).toHaveURL(/\/buchungen\/neu$/);
+  // Ein Tippfehler danach: Vor dem ersten „Buchen“ stand er in der Liste; jetzt muss er irgendwo stehen
+  await form.getByLabel("Konto Zeile 1").fill("12");
+  await expect(form.getByText(/Konto hat vier Ziffern/)).toBeVisible();
+});
+
 test("Eröffnung nicht am 1. Januar: der Fehler steht am Datum und der Fokus dort (Review #971)", async () => {
   await go("/buchungen/neu");
   const form = page.getByRole("form", { name: "Manuelle Buchung" });
@@ -127,7 +176,7 @@ test("Eröffnung nach geleertem Datum: „Wähle das Datum.“ steht am Feld, ni
 
 test("Manuelle Buchung: Stammkapital erfassen, prüfen, stornieren", async () => {
   await go("/buchungen");
-  await page.getByRole("link", { name: "Buchung erfassen" }).click();
+  await page.locator(".page-head").getByRole("link", { name: "Buchung erfassen" }).click();
   await page.waitForURL("**/buchungen/neu");
   await page.waitForLoadState("networkidle");
   expect(await axe(), "/buchungen/neu").toEqual([]);
@@ -229,7 +278,18 @@ test("Jahresabschluss: Bilanz und GuV der Kleinst-GmbH, Vorjahr abschließen", a
 
   // Körperschaft- und Gewerbesteuer: Hebesatz speichern, dann rechnet die Seite
   const steuern = page.getByRole("form", { name: "Angaben zur Körperschaft- und Gewerbesteuer" });
-  await steuern.getByLabel("Hebesatz der Gemeinde (%)").fill("400");
+  // Ungültiges meldet sich am eigenen Feld, der Fokus geht aufs erste, gespeichert wird nichts (#1277)
+  const hebesatz = steuern.getByLabel("Hebesatz der Gemeinde (%)");
+  const vortragKst = steuern.getByLabel(/^Verlustvortrag Körperschaftsteuer/);
+  await hebesatz.fill("400,5");
+  await vortragKst.fill("zehntausend");
+  await steuern.getByRole("button", { name: "Angaben speichern" }).click();
+  await expect(hebesatz).toBeFocused();
+  await expect(hebesatz).toHaveAccessibleDescription(/In ganzen Prozent, \d{4} mindestens \d+ %\..*Trag den Hebesatz der Gemeinde in ganzen Prozent ein/);
+  await expect(vortragKst).toHaveAccessibleDescription("Trag den Betrag ein, etwa 10.000,00, oder lass das Feld leer.");
+  await expect(page.getByText("Angaben gespeichert.")).toHaveCount(0);
+  await hebesatz.fill("400");
+  await vortragKst.fill("");
   await steuern.getByRole("button", { name: "Angaben speichern" }).click();
   await expect(page.getByText("Angaben gespeichert.")).toBeVisible();
   const rechnung = page.getByRole("region", { name: `Körperschaft- und Gewerbesteuer ${year}` });
@@ -593,7 +653,7 @@ test("Beleg stornieren und neu erfassen: Gegenbuchung, Hinweis am Beleg, Entwurf
   await faktenZeigen(page, "Betrag");
   await bestaetigen(page, "Stornieren");
   await expect(page.getByText(/Storniert mit einer Gegenbuchung zum .* Grund: Brutto als Netto erfasst/)).toBeVisible();
-  await expect(page.getByRole("link", { name: "Gegenbuchung" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Gegenbuchung", exact: true })).toBeVisible();
   await expect(page.locator(".page-head").getByText("Storniert", { exact: true })).toBeVisible();
   expect(await axe(), "/belege/… storniert").toEqual([]);
 
@@ -612,7 +672,7 @@ test("Beleg stornieren und neu erfassen: Gegenbuchung, Hinweis am Beleg, Entwurf
   // Der stornierte Beleg führt jetzt zur Neuerfassung
   await go(new URL(original).pathname);
   await expect(page.getByRole("link", { name: "Zur Neuerfassung" })).toBeVisible();
-  await page.getByRole("link", { name: "Gegenbuchung" }).click();
+  await page.getByRole("link", { name: "Gegenbuchung", exact: true }).click();
   await page.waitForURL(/\/buchungen/);
   await expect(page.getByText(/Storno: Beleg L-4711/)).toBeVisible();
 });
@@ -1124,6 +1184,37 @@ test("SV-Meldeportal: Minijob abrechnen, Beitragsnachweis und Anmeldung abtippen
   await expect(page.getByRole("row", { name: new RegExp(`Anmeldung Mia Aushilfe \\(Beginn 01\\.${mm}\\.${lohnJahr}\\)`) })).toBeVisible();
   await page.getByText(/^Erledigt \(/).click();
   await expect(page.getByRole("row", { name: new RegExp(`Beitragsnachweis ${lohnMonatsname} ${lohnJahr} · Minijob-Zentrale`) })).toBeVisible();
+});
+
+test("Mitarbeiter: Beim Wechsel ohne Neuladen bleiben „Stammdaten gespeichert.“ und ein Fehler des vorigen nicht stehen (#1843)", async () => {
+  // Erika und Mia aus den Tests davor
+  test.skip(!LOHN_BMF[lohnJahr], `Werte für ${lohnJahr} fehlen`);
+  const erika = page.getByRole("heading", { level: 1, name: "Erika Gesellschafter" });
+  const speichern = page.getByRole("button", { name: "Speichern", exact: true });
+  const gespeichert = page.getByRole("status").filter({ hasText: "Stammdaten gespeichert." });
+  const fehler = page.getByRole("alert");
+  await go("/lohn");
+  await ueberSchnellsuche(page, "Erika Gesellschafter", /Erika Gesellschafter\s*Personalnr/);
+  await expect(erika).toBeVisible();
+  // Dieselbe Person gespeichert: Die Meldung bleibt
+  await speichern.click();
+  await expect(gespeichert).toBeVisible();
+
+  // Bei der anderen scheitert das Speichern
+  await ueberSchnellsuche(page, "Mia Aushilfe", /Mia Aushilfe\s*Personalnr/);
+  await expect(page.getByRole("heading", { level: 1, name: "Mia Aushilfe" })).toBeVisible();
+  await expect(gespeichert).toHaveCount(0);
+  const abbrechen = (route: Route) => (route.request().method() === "POST" ? route.abort() : route.continue());
+  await page.route(/_serverFn/, abbrechen);
+  await speichern.click();
+  await expect(fehler).toBeVisible();
+  await page.unroute(/_serverFn/, abbrechen);
+
+  // Zurück zu Erika: weder ihre Meldung von vorhin noch der Fehler bei Mia
+  await ueberSchnellsuche(page, "Erika Gesellschafter", /Erika Gesellschafter\s*Personalnr/);
+  await expect(erika).toBeVisible();
+  await expect(fehler).toHaveCount(0);
+  await expect(gespeichert).toHaveCount(0);
 });
 
 test("Fahrzeug der GmbH übernehmen: keine Staffel nach § 7 Abs. 2a EStG, linear mit Erinnerungswert", async () => {

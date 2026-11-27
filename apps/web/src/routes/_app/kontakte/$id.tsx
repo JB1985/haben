@@ -13,6 +13,8 @@ import { UstIdBestaetigungCard } from "../../../components/UstIdBestaetigungCard
 import { formatDateTime } from "../../../lib/format.ts";
 import { ERSTES_JAHR, LETZTES_JAHR } from "../../../lib/jahre.ts";
 import { useAction } from "../../../lib/use-action.ts";
+import { useBereichAktiv } from "../../../lib/use-bereich.ts";
+import { getBankverbindungAuswahl } from "../../../server/functions/bankverbindungen.ts";
 import { archiveContact, getContactDetail, getContactHistory } from "../../../server/functions/contacts.ts";
 import { getContactPersons } from "../../../server/functions/contact-persons.ts";
 import { getCustomerNumbering } from "../../../server/functions/invoices.ts";
@@ -31,7 +33,7 @@ export const Route = createFileRoute("/_app/kontakte/$id")({
   }),
   loaderDeps: ({ search }) => ({ jahr: search.jahr }),
   loader: async ({ params, deps }) => {
-    const [detail, mandates, personen, history, ustid, kreise, service] = await Promise.all([
+    const [detail, mandates, personen, history, ustid, kreise, service, bankverbindungen] = await Promise.all([
       getContactDetail({ data: params.id }),
       getMandates({ data: params.id }),
       getContactPersons({ data: params.id }),
@@ -39,8 +41,9 @@ export const Route = createFileRoute("/_app/kontakte/$id")({
       getUstIdBestaetigungen({ data: params.id }),
       getCustomerNumbering({ data: { contactId: params.id } }),
       getContactServiceSummary({ data: params.id }),
+      getBankverbindungAuswahl(),
     ]);
-    return { ...detail, ...mandates, ...personen, history, ustid, kreise, service };
+    return { ...detail, ...mandates, ...personen, history, ustid, kreise, service, bankverbindungen };
   },
   head: ({ loaderData }) => ({
     meta: [{ title: `${loaderData?.contact.name ?? "Kontakt"} · Haben` }],
@@ -54,23 +57,24 @@ export const Route = createFileRoute("/_app/kontakte/$id")({
 });
 
 function ContactPage() {
-  const { contact, versions, mandates, persons, today, history, ustid, kreise, service } = Route.useLoaderData();
+  const { contact, history, service, bankverbindungen } = Route.useLoaderData();
   const { bestaetigen } = Route.useSearch();
   const router = useRouter();
   const navigate = useNavigate({ from: Route.fullPath });
   const archive = useServerFn(archiveContact);
   const { busy, notice, run } = useAction();
-  // Kontakt, der gerade gespeichert wurde; das Formular entsteht danach mit der neuen Version neu (key) und zeigt die Meldung von hier
-  const [savedId, setSavedId] = useState<string | null>(null);
-  // Kontakt, für den nach dem Anlegen (Suchparameter) oder Speichern einmal beim BZSt nachgefragt wird; eine ID wie savedId,
-  // denn beim Wechsel zu einem anderen Kontakt bleibt die Seite stehen
-  const [pruefenFuer, setPruefenFuer] = useState<string | null>(null);
+  // Gerade gespeichert; das Formular entsteht danach mit der neuen Version neu (key) und zeigt die Meldung von hier
+  const [saved, setSaved] = useState(false);
+  // Nach dem Anlegen (Suchparameter) oder Speichern einmal beim BZSt nachfragen
+  const [pruefen, setPruefen] = useState(false);
+  const schreiben = useBereichAktiv("rechnungserstellung");
+  const zeiteintraege = useBereichAktiv("zeiteintraege");
   // Den Suchparameter gleich nehmen, solange die Seite den Kontakt zeigt; später träfe die Navigation die Seite, auf der man dann ist
   useEffect(() => {
     if (!bestaetigen) return;
-    setPruefenFuer(contact.id);
+    setPruefen(true);
     void navigate({ search: (s) => ({ ...s, bestaetigen: undefined }), replace: true });
-  }, [bestaetigen, contact.id, navigate]);
+  }, [bestaetigen, navigate]);
   return (
     <>
       <div className="page-head">
@@ -82,14 +86,16 @@ function ContactPage() {
         </div>
         <div className="actions">
           {/* Zeiteinträge bei Kunden und bei jedem Kontakt mit Einträgen (#1557); offene führen gleich zum Stand „offen“ */}
-          {(contact.isCustomer || service.entries > 0) && (
+          {zeiteintraege && (contact.isCustomer || service.entries > 0) && (
             <Link to="/leistungen" search={{ kunde: contact.id, stand: service.openMinutes > 0 ? "offen" : undefined }} className="btn">
               Zeiteinträge{service.openMinutes > 0 && ` · ${formatDuration(service.openMinutes)} offen`}
             </Link>
           )}
-          <Link to="/rechnungen/neu" search={contact.isCustomer && !contact.archivedAt ? { kunde: contact.id } : {}} className="btn">
-            Rechnung schreiben
-          </Link>
+          {schreiben && (
+            <Link to="/rechnungen/neu" search={contact.isCustomer && !contact.archivedAt ? { kunde: contact.id } : {}} className="btn">
+              Rechnung schreiben
+            </Link>
+          )}
           <button
             type="button"
             className="btn"
@@ -110,52 +116,60 @@ function ContactPage() {
         <ContactForm
           key={contact.version}
           contact={contact}
-          saved={savedId === contact.id}
+          saved={saved}
+          bankverbindungen={bankverbindungen}
           onUpdated={() => {
-            setSavedId(contact.id);
-            setPruefenFuer(contact.id);
+            setSaved(true);
+            setPruefen(true);
           }}
         />
-        <div className="stack">
-          {/* Abgeschaltet wie vor #1385: ohne Karte, außer es gibt schon Antworten */}
-          {(ustid.bestaetigungen.length > 0 || ustid.zustand.art === "bereit" || ustid.zustand.art === "ohne-eigene") && (
-            <UstIdBestaetigungCard
-              key={contact.id}
-              contactId={contact.id}
-              ustId={contact.ustId}
-              bestaetigungen={ustid.bestaetigungen}
-              zustand={ustid.zustand}
-              nachSpeichern={pruefenFuer === contact.id}
-              onNachSpeichernErledigt={() => setPruefenFuer((id) => (id === contact.id ? null : id))}
-            />
-          )}
-          <ContactPersonsCard contactId={contact.id} persons={persons} />
-          <MandateCard
-            contactId={contact.id}
-            contactName={contact.name}
-            contactIban={contact.iban}
-            isCustomer={contact.isCustomer}
-            mandates={mandates}
-            today={today}
-          />
-          {/* Zähler je Kunde (#1426): die Karte einer Art steht nur, wenn deren Kreis läuft und der Kontakt eine Kundennummer trägt */}
-          {contact.kundennummer && kreise.invoice && <NumberingCard numbering={kreise.invoice} contactId={contact.id} />}
-          {contact.kundennummer && kreise.quote && <NumberingCard numbering={kreise.quote} contactId={contact.id} />}
-          <section className="card" aria-labelledby="versions-heading">
-            <h2 id="versions-heading">Versionen</h2>
-            <p className="small muted" style={{ margin: 0 }}>
-              Änderungen überschreiben nichts. Festgeschriebene Rechnungen behalten die Anschrift, die beim Festschreiben galt.
-            </p>
-            {versions.map((v) => (
-              <div key={v.version} className="history-row">
-                <span>Version {v.version}</span>
-                <span className="small muted">{formatDateTime(v.createdAt)}</span>
-              </div>
-            ))}
-          </section>
-        </div>
+        <ContactCards nachSpeichern={pruefen} onNachSpeichernErledigt={() => setPruefen(false)} />
       </div>
       <ContactHistory contactId={contact.id} isCustomer={contact.isCustomer} isSupplier={contact.isSupplier} history={history} />
     </>
+  );
+}
+
+/** Karten neben dem Formular; nachSpeichern: nach dem Anlegen oder Speichern einmal beim BZSt nachfragen (#1385) */
+function ContactCards({ nachSpeichern, onNachSpeichernErledigt }: { nachSpeichern: boolean; onNachSpeichernErledigt: () => void }) {
+  const { contact, versions, mandates, persons, today, ustid, kreise } = Route.useLoaderData();
+  return (
+    <div className="stack">
+      {/* Abgeschaltet wie vor #1385: ohne Karte, außer es gibt schon Antworten */}
+      {(ustid.bestaetigungen.length > 0 || ustid.zustand.art === "bereit" || ustid.zustand.art === "ohne-eigene") && (
+        <UstIdBestaetigungCard
+          contactId={contact.id}
+          ustId={contact.ustId}
+          bestaetigungen={ustid.bestaetigungen}
+          zustand={ustid.zustand}
+          nachSpeichern={nachSpeichern}
+          onNachSpeichernErledigt={onNachSpeichernErledigt}
+        />
+      )}
+      <ContactPersonsCard contactId={contact.id} persons={persons} />
+      <MandateCard
+        contactId={contact.id}
+        contactName={contact.name}
+        contactIban={contact.iban}
+        isCustomer={contact.isCustomer}
+        mandates={mandates}
+        today={today}
+      />
+      {/* Zähler je Kunde (#1426): die Karte einer Art steht nur, wenn deren Kreis läuft und der Kontakt eine Kundennummer trägt */}
+      {contact.kundennummer && kreise.invoice && <NumberingCard numbering={kreise.invoice} contactId={contact.id} />}
+      {contact.kundennummer && kreise.quote && <NumberingCard numbering={kreise.quote} contactId={contact.id} />}
+      <section className="card" aria-labelledby="versions-heading">
+        <h2 id="versions-heading">Versionen</h2>
+        <p className="small muted" style={{ margin: 0 }}>
+          Änderungen überschreiben nichts. Festgeschriebene Rechnungen behalten die Anschrift, die beim Festschreiben galt.
+        </p>
+        {versions.map((v) => (
+          <div key={v.version} className="history-row">
+            <span>Version {v.version}</span>
+            <span className="small muted">{formatDateTime(v.createdAt)}</span>
+          </div>
+        ))}
+      </section>
+    </div>
   );
 }

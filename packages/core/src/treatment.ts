@@ -1,4 +1,6 @@
 import type { BasisPoints } from "./money.ts";
+import type { OutgoingTaxDetails } from "./outgoing-tax.ts";
+import { vatTerritory } from "./vat-territories.ts";
 import { normalizeUstId, ustIdAufbauProblem, ustIdProblem } from "./zm.ts";
 
 /**
@@ -115,6 +117,18 @@ export function treatmentNote(treatment: TaxTreatment, exemptionReason?: string 
   return exemptionReason?.trim() || TAX_TREATMENTS[treatment].note;
 }
 
+/**
+ * Was an der USt-IdNr. des Kunden das Festschreiben einer Rechnung mit Reverse Charge (#1433) oder innergemeinschaftlicher
+ * Lieferung (#1413) sperrt, für eine vorhandene, normalisierte Nummer; null = nichts. Prüfung wie in der Zusammenfassenden
+ * Meldung (Art S bzw. L) und nach dem Aufbau je Mitgliedstaat. Storno und Korrektur übernehmen die Nummer einer
+ * festgeschriebenen Rechnung: bei Reverse Charge ohne Prüfung, bei der Lieferung ohne den Aufbau. Auch die Rückfrage zum
+ * Festschreiben nennt damit die Sperre statt eines Hinweises (ustIdVorFestschreiben).
+ */
+export function kundenUstIdSperre(treatment: "reverse_charge" | "ig_lieferung", buyerUstId: string, correctsInvoice = false): string | null {
+  if (treatment === "reverse_charge") return correctsInvoice ? null : (ustIdProblem(buyerUstId, "S") ?? ustIdAufbauProblem(buyerUstId));
+  return ustIdProblem(buyerUstId, "L") ?? (correctsInvoice ? null : ustIdAufbauProblem(buyerUstId));
+}
+
 /** Was an einer Rechnung mit dieser Behandlung fehlt oder nicht passt; leer = in Ordnung. */
 export function treatmentIssues(
   treatment: TaxTreatment,
@@ -123,6 +137,8 @@ export function treatmentIssues(
     sellerUstId?: string;
     buyerUstId?: string;
     buyerCountry?: string;
+    buyerPostalCode?: string;
+    foreignPlace?: OutgoingTaxDetails["foreignPlace"];
     exemptionReason?: string | null;
     /** Storno oder Korrektur: übernimmt die USt-IdNr. der festgeschriebenen Rechnung, die sich nicht mehr berichtigen lässt */
     correctsInvoice?: boolean;
@@ -132,9 +148,22 @@ export function treatmentIssues(
   const issues: string[] = [];
   if (input.rates.some((rate) => rate !== 0)) issues.push("Bei der gewählten Umsatzsteuer müssen alle Positionen 0 % haben");
   const country = input.buyerCountry?.toUpperCase();
+  // Die Sondergebiets-PLZ öffnet den Drittlandweg. Für EU-Behandlungen gelten die bisherigen Länderprüfungen.
+  // Der unverbindliche Hinweis steht getrennt von diesen Pflichtprüfungen im Kontakt und im Entwurf.
+  const territory = vatTerritory(country, input.buyerPostalCode);
   if (treatment === "reverse_charge") {
     if (!input.sellerUstId?.trim()) issues.push("Reverse Charge braucht deine USt-IdNr. in den Firmendaten");
-    if (!input.buyerUstId?.trim()) issues.push("Reverse Charge braucht die USt-IdNr. des Kunden");
+    // § 14a Abs. 1 Satz 3 UStG: die USt-IdNr. des Leistungsempfängers auf der Rechnung; die Leistung geht mit Art S und der
+    // ihm in einem anderen Mitgliedstaat erteilten Nummer in die Zusammenfassende Meldung (§ 18a Abs. 7 Satz 1 Nr. 3 Buchst. a),
+    // eine nordirische gilt nur im Warenverkehr (UStAE 1.10 Abs. 3). Geprüft wie dort und nach dem Aufbau je Mitgliedstaat
+    // (#1433), solange sich die Nummer noch berichtigen lässt. Storno und Korrektur nur, ob sie da ist: Vor #1433 ließ sich
+    // jede Nummer festschreiben.
+    const buyerUstId = normalizeUstId(input.buyerUstId ?? "");
+    if (!buyerUstId) issues.push("Reverse Charge braucht die USt-IdNr. des Kunden");
+    else {
+      const problem = kundenUstIdSperre(treatment, buyerUstId, input.correctsInvoice);
+      if (problem) issues.push(problem);
+    }
     if (country === "DE") issues.push("Reverse Charge gilt nur für Kunden im EU-Ausland");
   }
   if (treatment === "ig_lieferung") {
@@ -146,7 +175,7 @@ export function treatmentIssues(
     const buyerUstId = normalizeUstId(input.buyerUstId ?? "");
     if (!buyerUstId) issues.push("Innergemeinschaftliche Lieferung braucht die USt-IdNr. des Kunden (§ 6a Abs. 1 Nr. 4 UStG)");
     else {
-      const problem = ustIdProblem(buyerUstId, "L") ?? (input.correctsInvoice ? null : ustIdAufbauProblem(buyerUstId));
+      const problem = kundenUstIdSperre(treatment, buyerUstId, input.correctsInvoice);
       if (problem) issues.push(problem);
     }
     // Nordirland gehört für Waren weiter zum Gemeinschaftsgebiet (XI-Nummer bei Ländercode GB)
@@ -159,11 +188,16 @@ export function treatmentIssues(
     // EN 16931 BR-G-02: Kategorie G verlangt die USt-IdNr. des Verkäufers (BT-31) oder seines Steuervertreters
     if (!input.sellerUstId?.trim()) issues.push("Ausfuhrlieferung braucht deine USt-IdNr. in den Firmendaten (EN 16931 BR-G-02)");
     // Haben nimmt die Anschrift des Kunden als Bestimmungsort; liegt sie in der EU, passt die Ausfuhr nicht
-    if (country && inEuVatArea(country)) {
+    if (country && !territory && inEuVatArea(country)) {
       issues.push("Ausfuhrlieferung nur an Kunden außerhalb der EU; im Gemeinschaftsgebiet ist es eine innergemeinschaftliche Lieferung");
     }
   }
-  if (treatment === "drittland" && country === "DE") issues.push("Der Kunde sitzt in Deutschland; die Leistung ist im Inland steuerbar");
+  const place = input.foreignPlace;
+  const actualForeignPlace =
+    place?.noForeignVat && /^[A-Z]{2}$/.test(place.country) && (!inEuVatArea(place.country) || vatTerritory(place.country, place.postalCode));
+  if (treatment === "drittland" && country === "DE" && !territory && !actualForeignPlace) {
+    issues.push("Der Kunde sitzt in Deutschland; die Leistung ist im Inland steuerbar");
+  }
   if (treatment === "steuerfrei" && !input.exemptionReason?.trim()) {
     issues.push("Bei steuerfreien Umsätzen bitte die Vorschrift angeben, z. B. „Steuerfrei nach § 4 Nr. 14 UStG“");
   }

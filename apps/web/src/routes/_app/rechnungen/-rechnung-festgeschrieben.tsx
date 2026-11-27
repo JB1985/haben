@@ -8,8 +8,10 @@ import { SendMailForm } from "../../../components/SendMail.tsx";
 import { formatDate, formatDateTime } from "../../../lib/format.ts";
 import { NoticeBanner } from "../../../components/NoticeBanner.tsx";
 import { useAction } from "../../../lib/use-action.ts";
+import { useBereichAktiv } from "../../../lib/use-bereich.ts";
 import { cancelFinalInvoice, correctFinalInvoice } from "../../../server/functions/invoices.ts";
 import { ConfirmDialog } from "../../../components/ConfirmDialog.tsx";
+import { KorrekturAktionen } from "../../../components/KorrekturAktionen.tsx";
 import { OutcomeStatus } from "../../../components/Status.tsx";
 import { Payments, WriteOffs } from "./-rechnung-zahlungen.tsx";
 import { type Detail, titleOf } from "./-rechnung-daten.ts";
@@ -39,6 +41,7 @@ export function FinalInvoice({ data }: { data: Detail }) {
     void router.invalidate();
   };
   const cancelled = correctedBy.find((c) => c.kind === "storno" && c.status === "final");
+  const hatKorrekturen = correctedBy.some((c) => c.kind === "korrektur" && c.status === "final");
   const canAmend = inhaber && invoice.kind === "rechnung" && !cancelled;
 
   const cancelNow = () => {
@@ -120,41 +123,16 @@ export function FinalInvoice({ data }: { data: Detail }) {
             )}
           </section>
 
-          {(data.dunnings.length > 0 || data.overdue) && (
-            <section className="card" aria-labelledby="dunning-heading">
-              <h2 id="dunning-heading">Mahnungen</h2>
-              {data.dunnings.map((d) => (
-                <div key={d.id} className="history-row">
-                  <a href={`/api/mahnung/${d.id}`} target="_blank" rel="noreferrer">
-                    {DUNNING_LEVELS[d.level as DunningLevel].label} vom {formatDate(d.date)}
-                  </a>
-                  <span className="small muted">
-                    {formatEuro(d.total)} bis {formatDate(d.dueDate)}{" "}
-                    {inhaber && (
-                      <button
-                        type="button"
-                        className="link-button"
-                        onClick={() => {
-                          setMailNotice(null);
-                          setMailing({ kind: "mahnung", id: d.id });
-                        }}
-                      >
-                        per E-Mail
-                      </button>
-                    )}
-                  </span>
-                </div>
-              ))}
-              {mailing?.kind === "mahnung" && <SendMailForm key={mailing.id} kind="mahnung" id={mailing.id} onDone={mailDone} />}
-              {inhaber && data.overdue && (
-                <div className="actions">
-                  <Link to="/rechnungen/mahnwesen/$id" params={{ id: invoice.id }} className="btn">
-                    {data.dunnings.length === 0 ? "Zahlungserinnerung erstellen" : "Nächste Mahnstufe"}
-                  </Link>
-                </div>
-              )}
-            </section>
-          )}
+          <Mahnverlauf
+            data={data}
+            inhaber={inhaber}
+            mailingId={mailing?.kind === "mahnung" ? mailing.id : undefined}
+            onMail={(id) => {
+              setMailNotice(null);
+              setMailing({ kind: "mahnung", id });
+            }}
+            onMailDone={mailDone}
+          />
 
           {inhaber && (data.payments.length > 0 || (data.open > 0 && invoice.kind !== "storno")) && (
             <Payments invoiceId={invoice.id} payments={data.payments} open={data.open} cashable={invoice.kind !== "storno" && invoice.currency === "EUR"} />
@@ -172,8 +150,7 @@ export function FinalInvoice({ data }: { data: Detail }) {
             <section className="card" aria-labelledby="amend-heading">
               <h2 id="amend-heading">Korrigieren</h2>
               <p className="small muted" style={{ margin: 0 }}>
-                Festgeschriebene Rechnungen bleiben unverändert. Eine Stornorechnung hebt sie vollständig auf, eine Rechnungskorrektur mindert den Betrag
-                teilweise.
+                Festgeschriebene Rechnungen bleiben unverändert.
               </p>
               <ConfirmDialog
                 open={confirming}
@@ -188,20 +165,61 @@ export function FinalInvoice({ data }: { data: Detail }) {
                 onConfirm={cancelNow}
                 onClose={() => setConfirming(false)}
               >
-                <p>Es wird sofort eine Stornorechnung mit neuer Nummer erzeugt und gebucht.</p>
+                <p>
+                  Es wird sofort eine Stornorechnung mit neuer Nummer erzeugt.
+                  {hatKorrekturen && " Jede festgeschriebene Korrektur bekommt ein eigenes Storno."}
+                </p>
               </ConfirmDialog>
-              <div className="actions">
-                <button type="button" className="btn btn-danger" onClick={() => setConfirming(true)} disabled={busy}>
-                  Stornieren
-                </button>
-                <button type="button" className="btn" onClick={onCorrect} disabled={busy}>
-                  Rechnungskorrektur anlegen
-                </button>
-              </div>
+              <KorrekturAktionen busy={busy} onCancel={() => setConfirming(true)} onCorrect={onCorrect} />
             </section>
           )}
         </div>
       </div>
     </>
+  );
+}
+
+function Mahnverlauf({
+  data,
+  inhaber,
+  mailingId,
+  onMail,
+  onMailDone,
+}: {
+  data: Detail;
+  inhaber: boolean;
+  mailingId: string | undefined;
+  onMail: (id: string) => void;
+  onMailDone: (message: string) => void;
+}) {
+  const mahnwesen = useBereichAktiv("mahnwesen");
+  if (data.dunnings.length === 0 && !(mahnwesen && data.overdue)) return null;
+  return (
+    <section className="card" aria-labelledby="dunning-heading">
+      <h2 id="dunning-heading">Mahnungen</h2>
+      {data.dunnings.map((d) => (
+        <div key={d.id} className="history-row">
+          <a href={`/api/mahnung/${d.id}`} target="_blank" rel="noreferrer">
+            {DUNNING_LEVELS[d.level as DunningLevel].label} vom {formatDate(d.date)}
+          </a>
+          <span className="small muted">
+            {formatEuro(d.total)} bis {formatDate(d.dueDate)}{" "}
+            {inhaber && mahnwesen && (
+              <button type="button" className="link-button" onClick={() => onMail(d.id)}>
+                per E-Mail
+              </button>
+            )}
+          </span>
+        </div>
+      ))}
+      {mahnwesen && mailingId && <SendMailForm key={mailingId} kind="mahnung" id={mailingId} onDone={onMailDone} />}
+      {inhaber && mahnwesen && data.overdue && (
+        <div className="actions">
+          <Link to="/rechnungen/mahnwesen/$id" params={{ id: data.invoice.id }} className="btn">
+            {data.dunnings.length === 0 ? "Zahlungserinnerung erstellen" : "Nächste Mahnstufe"}
+          </Link>
+        </div>
+      )}
+    </section>
   );
 }

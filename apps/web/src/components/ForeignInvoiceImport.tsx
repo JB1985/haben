@@ -1,4 +1,4 @@
-import { amountError, formatDecimal, type OutgoingTaxDetails, parseEuro, type TaxTreatment } from "@haben/core";
+import { amountError, type OutgoingTaxDetails, parseEuro, type TaxTreatment } from "@haben/core";
 import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import type { UmsatzgrenzeBestaetigung } from "../lib/kleinunternehmer.ts";
@@ -7,7 +7,8 @@ import { EMPTY_DETAILS } from "./OutgoingTaxFields.tsx";
 import { ContactCombobox, savedAsChoice } from "./ContactCombobox.tsx";
 import { Field } from "./Field.tsx";
 import { FilePicker } from "./FilePicker.tsx";
-import { FOREIGN, TaxSection, type TaxRow } from "./ForeignInvoiceTax.tsx";
+import { ForeignCancellationForm } from "./ForeignCancellationForm.tsx";
+import { FOREIGN, nurNetto, startZeilen, TaxSection, type TaxRow } from "./ForeignInvoiceTax.tsx";
 import { NewContactDialog } from "./NewContactDialog.tsx";
 import { UmsatzgrenzeDialog } from "./UmsatzgrenzeDialog.tsx";
 
@@ -39,8 +40,8 @@ export function ForeignInvoiceImport({ onClose }: { onClose: () => void }) {
       <div className="form-card-head">
         <h2 id="fremdrechnung-heading">Ausgangsrechnung hochladen</h2>
         <p className="muted">
-          Für Rechnungen, die ein anderes Programm geschrieben und verschickt hat. Nummer und PDF bleiben unverändert, die Rechnung wird wie eine eigene gebucht
-          und läuft danach durch Bankabgleich und Mahnwesen.
+          Für Rechnungen, die ein anderes Programm geschrieben und verschickt hat, und deren Stornos. Nummer und PDF bleiben unverändert, die Rechnung wird wie
+          eine eigene gebucht und läuft danach durch Bankabgleich und Mahnwesen.
         </p>
       </div>
       <div className="form-section">
@@ -49,11 +50,19 @@ export function ForeignInvoiceImport({ onClose }: { onClose: () => void }) {
             {error}
           </div>
         )}
-        <Field label="Original der Rechnung (PDF, auch ZUGFeRD)">
+        <Field label="Original der Rechnung oder des Stornos (PDF, auch ZUGFeRD)">
           {(control) => <FilePicker {...control} accept="application/pdf,.pdf" onChange={(e) => void choose(e.target.files?.[0] ?? null)} />}
         </Field>
       </div>
-      {read ? (
+      {read?.data.proposal.cancels ? (
+        <ForeignCancellationForm
+          key={read.file.name + read.file.size + read.file.lastModified}
+          file={read.file}
+          proposal={read.data.proposal}
+          cancels={read.data.proposal.cancels}
+          onClose={onClose}
+        />
+      ) : read ? (
         <ForeignInvoiceForm key={read.file.name + read.file.size + read.file.lastModified} file={read.file} read={read.data} onClose={onClose} />
       ) : (
         <div className="actions form-footer">
@@ -110,15 +119,12 @@ function ForeignInvoiceForm({ file, read, onClose }: { file: File; read: Read; o
   const [contactId, setContactId] = useState(p.contactId ?? "");
   /** Offener Dialog „Neuer Kunde“ mit dem vorgetragenen Namen; null = geschlossen */
   const [newContactName, setNewContactName] = useState<string | null>(null);
-  const [treatment, setTreatment] = useState<TaxTreatment>(read.kleinunternehmer ? "kleinunternehmer" : p.taxTreatment);
+  const initialTreatment: TaxTreatment = read.kleinunternehmer ? "kleinunternehmer" : p.taxTreatment;
+  const [treatment, setTreatment] = useState<TaxTreatment>(initialTreatment);
   const [exemptionReason, setExemptionReason] = useState("");
   /** Nur der Leistungsort einer Auslandsleistung; null = ungeklärt, nie aus der Kundenanschrift vorbelegt */
   const [foreignPlace, setForeignPlace] = useState<OutgoingTaxDetails["foreignPlace"]>(null);
-  const [rows, setRows] = useState<TaxRow[]>(
-    p.taxes.length > 0
-      ? p.taxes.map((t) => ({ rate: String(t.rate), net: formatDecimal(t.net), tax: formatDecimal(t.tax) }))
-      : [{ rate: "1900", net: "", tax: "" }],
-  );
+  const [rows, setRows] = useState<TaxRow[]>(() => startZeilen(p.taxes, initialTreatment));
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -168,6 +174,7 @@ function ForeignInvoiceForm({ file, read, onClose }: { file: File; read: Read; o
           treatment={treatment}
           onTreatment={(value) => {
             setTreatment(value);
+            if (value !== "regulaer") setRows(nurNetto);
             // Wie im Rechnungseditor: Eine neue Behandlung braucht eine erneute Bestätigung des Leistungsorts
             setForeignPlace(null);
           }}
@@ -180,11 +187,11 @@ function ForeignInvoiceForm({ file, read, onClose }: { file: File; read: Read; o
           onRows={setRows}
         />
         <div className="actions form-footer">
-          <button type="submit" className="btn btn-primary" disabled={busy}>
-            Übernehmen
-          </button>
           <button type="button" className="btn" onClick={onClose}>
             Abbrechen
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={busy}>
+            Übernehmen
           </button>
         </div>
       </form>

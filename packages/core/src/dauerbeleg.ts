@@ -3,7 +3,8 @@
  * im Intervall Eingangsbelege an. Termine wie bei wiederkehrenden Rechnungen (recurring.ts): Ankertag, der 31. wird in
  * kürzeren Monaten zum Monatsende und springt danach zurück, verpasste Termine werden nachgeholt.
  */
-import type { BasisPoints, Cents } from "./money.ts";
+import { EXPENSE_CATEGORIES, hatEigenschaft } from "./kontenplan.ts";
+import { taxIncluded, type BasisPoints, type Cents } from "./money.ts";
 import { type Recurrence, recurrenceParts } from "./recurrence.ts";
 import { recurrenceDueDates, nextRecurrenceDate } from "./recurring.ts";
 
@@ -87,22 +88,57 @@ export function dauerbelegProbleme(vorlage: {
   amounts: DauerbelegBetrag[];
   /** Das hinterlegte Dokument weist die Umsatzsteuer gesondert aus (Dauerrechnung, Vertrag mit Steuerbetrag) */
   taxShown: boolean;
+  /** Das Dokument nennt nur Endbetrag und Steuersatz, höchstens 250 € je Termin: Kleinbetragsrechnung (#1101) */
+  kleinbetrag: boolean;
 }): string[] {
   const probleme: string[] = [];
   if (vorlage.endDate && vorlage.endDate < vorlage.nextDate) probleme.push("Das Ende liegt vor dem nächsten Termin.");
-  if (vorlage.category === "anlage") probleme.push("Anlagegüter werden nicht als Dauerbeleg erfasst, sondern einzeln mit Abschreibung.");
+  // Welche Kategorie kein Dauerbeleg sein kann, sagt der Steckbrief (kontenplan.ts); heute nur das Anlagegut
+  if (Object.hasOwn(EXPENSE_CATEGORIES, vorlage.category) && !hatEigenschaft(vorlage.category, "dauerbeleg")) {
+    probleme.push(
+      vorlage.category === "anlage"
+        ? "Anlagegüter werden nicht als Dauerbeleg erfasst, sondern einzeln mit Abschreibung."
+        : "Diese Kategorie lässt sich nicht als Dauerbeleg erfassen.",
+    );
+  }
   if (vorlage.amounts.length === 0 || vorlage.amounts.every((a) => a.net === 0 && a.tax === 0)) probleme.push("Beträge fehlen.");
   if (vorlage.amounts.some((a) => a.net < 0 || a.tax < 0)) probleme.push("Dauerbelege sind Ausgaben; Gutschriften erfasst du als einzelnen Beleg.");
   if (new Set(vorlage.amounts.map((a) => a.taxRate)).size !== vorlage.amounts.length) probleme.push("Jeder Steuersatz nur einmal.");
+  if (vorlage.kleinbetrag) {
+    probleme.push(...kleinbetragProbleme(vorlage));
+    return probleme;
+  }
   // § 15 Abs. 1 Nr. 1 UStG: Vorsteuer nur aus einer Rechnung mit gesondert ausgewiesener Steuer (§ 14 Abs. 4 Nr. 8 UStG);
   // ein Vertrag gilt als Rechnung, wenn er die Angaben enthält (UStAE 14.1 Abs. 2)
   if (!vorlage.taxShown && vorlage.amounts.some((a) => a.tax !== 0)) probleme.push(VORSTEUER_HINWEIS);
   return probleme;
 }
 
+/** Höchstbetrag einer Kleinbetragsrechnung, brutto (§ 33 UStDV) */
+export const KLEINBETRAG_GRENZE: Cents = 25_000;
+
+export const KLEINBETRAG_HINWEIS =
+  "Eine Kleinbetragsrechnung geht nur bis 250 € brutto je Termin (§ 33 UStDV). Darüber braucht es ein Dokument, das die Umsatzsteuer gesondert ausweist.";
+
+export const KLEINBETRAG_AUFTEILUNG = "Bei einer Kleinbetragsrechnung teilt Haben den Endbetrag je Satz in Netto und Steuer auf (§ 35 Abs. 1 UStDV).";
+
+/**
+ * Kleinbetragsrechnung am Dauerbeleg (#1101): Der Vertrag nennt nur Endbetrag und Steuersatz. Mit den Zahlungsbelegen ist
+ * er die Rechnung über die einzelne Teilleistung (§ 31 Abs. 1 UStDV, UStAE 14.5 Abs. 17); deren Gesamtbetrag ist der Betrag
+ * je Termin und darf 250 € nicht übersteigen (§ 33 UStDV, UStAE 14.6 Abs. 1). Die Vorsteuer ist die Aufteilung des
+ * Endbetrags (§ 35 Abs. 1 UStDV), kaufmännisch gerundet wie am Beleg (`taxIncluded`).
+ */
+function kleinbetragProbleme(vorlage: { taxShown: boolean; amounts: DauerbelegBetrag[] }): string[] {
+  if (vorlage.taxShown) return ["Entweder weist das Dokument die Steuer aus, oder es ist eine Kleinbetragsrechnung."];
+  const probleme: string[] = [];
+  if (vorlage.amounts.some((a) => a.tax !== taxIncluded(a.net + a.tax, a.taxRate))) probleme.push(KLEINBETRAG_AUFTEILUNG);
+  if (dauerbelegSummen(vorlage.amounts).gross > KLEINBETRAG_GRENZE) probleme.push(KLEINBETRAG_HINWEIS);
+  return probleme;
+}
+
 /** Hinweis, wenn das Dokument keine Umsatzsteuer ausweist */
 export const VORSTEUER_HINWEIS =
-  "Vorsteuer nur mit einem Dokument, das die Umsatzsteuer gesondert ausweist (Dauerrechnung oder Vertrag mit Steuerbetrag). Ohne Steuerausweis den Betrag mit 0 % erfassen.";
+  "Vorsteuer nur mit einem Dokument, das die Umsatzsteuer gesondert ausweist (Dauerrechnung oder Vertrag mit Steuerbetrag) oder als Kleinbetragsrechnung bis 250 € je Termin Endbetrag und Steuersatz nennt. Sonst den Betrag mit 0 % erfassen.";
 
 /** Summen der Beträge: Netto, Steuer, Brutto */
 export function dauerbelegSummen(amounts: DauerbelegBetrag[]): { net: Cents; tax: Cents; gross: Cents } {

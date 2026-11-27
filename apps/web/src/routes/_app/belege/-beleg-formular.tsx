@@ -6,6 +6,7 @@ import { ConfirmDialog } from "../../../components/ConfirmDialog.tsx";
 import { DocumentSplits } from "../../../components/DocumentSplits.tsx";
 import { SOURCE_LABEL } from "../../../components/DocumentStatus.tsx";
 import { Icon } from "../../../components/Icon.tsx";
+import { BuchungLinks } from "../../../components/Ledger.tsx";
 import { UstIdVorBuchen } from "../../../components/UstIdVorFestschreiben.tsx";
 import { steuerSpalte } from "../../../components/VorsteuerAnteil.tsx";
 import { formatDate, formatDateTime } from "../../../lib/format.ts";
@@ -92,7 +93,11 @@ function BelegHinweise({ data, locked, running }: { data: Detail; locked: boolea
       {running && (
         <div className="banner banner-info" role="status">
           <Icon name="info" />
-          <span>Die KI liest den Beleg gerade aus. Die Felder füllen sich gleich.</span>
+          <span>
+            {doc.extractionStatus === "wartet"
+              ? "Der Beleg wartet auf die KI-Auslesung. Die Felder füllen sich, sobald er dran ist."
+              : "Die KI liest den Beleg gerade aus. Die Felder füllen sich gleich."}
+          </span>
         </div>
       )}
       {doc.extractionError && !locked && (
@@ -118,8 +123,22 @@ function BelegHinweise({ data, locked, running }: { data: Detail; locked: boolea
       {locked && !data.cancellation && (
         <div className="banner banner-ok" role="status">
           <Icon name="check" />
-          <span>Gebucht {doc.lockedAt ? formatDateTime(doc.lockedAt) : ""}. Der Beleg ist festgeschrieben.</span>
+          <span>
+            Gebucht {doc.lockedAt ? formatDateTime(doc.lockedAt) : ""}. Der Beleg ist festgeschrieben.
+            {data.buchungen.length > 0 && (
+              <>
+                {" "}
+                Im Journal: <BuchungLinks buchungen={data.buchungen} />.
+              </>
+            )}
+          </span>
         </div>
+      )}
+      {/* Nach dem Storno steht der Hinweis „Gebucht“ nicht mehr; der Weg ins Journal bleibt, auch für die Steuerberatung */}
+      {locked && data.cancellation && data.buchungen.length > 0 && (
+        <p className="small" style={{ margin: 0 }}>
+          Im Journal: <BuchungLinks buchungen={data.buchungen} />.
+        </p>
       )}
     </>
   );
@@ -127,7 +146,7 @@ function BelegHinweise({ data, locked, running }: { data: Detail; locked: boolea
 
 /** Aufteilung auf mehrere Kategorien (#271) */
 function BelegAufteilung({ f, data }: { f: DocumentFormState; data: Detail }) {
-  const { readOnly, running, reverseCharge, rows, splitRows, setSplitRows, parsed, vorsteuerBeleg, foreign, error, touch, setCategory, setOwnAccountId } = f;
+  const { fieldsDisabled, reverseCharge, rows, splitRows, setSplitRows, parsed, vorsteuerBeleg, foreign, error, touch, setCategory, setOwnAccountId } = f;
   return (
     <div id="aufteilung">
       <DocumentSplits
@@ -137,7 +156,7 @@ function BelegAufteilung({ f, data }: { f: DocumentFormState; data: Detail }) {
         }
         categories={data.categories}
         ownAccounts={data.ownAccounts}
-        disabled={readOnly || running}
+        disabled={fieldsDisabled}
         onChange={touch(setSplitRows)}
         taxLabel={steuerSpalte(reverseCharge, vorsteuerBeleg, rows)}
         error={(feld, key) => error(`${feld === "netto" ? "aufteilung" : "kategorie"}-${key}`)}

@@ -13,13 +13,14 @@ import {
   weitereAngabenOeffnen,
   ohneAxeVerstoesse,
   trefferliste,
+  ueberSchnellsuche,
 } from "./einrichtung.ts";
 import { LAPTOP, sichtbar } from "./kopfzeile.ts";
 import { abzugEinspielen } from "./abzug.ts";
 import { receiptJpeg } from "./belegbild.ts";
 import { vorsteuerPruefen } from "./belege-vorsteuer.ts";
 import { serverAufrufe } from "./warten.ts";
-import { eingabeNachAktion, fokusNachFehlschlag, kurzNacheinanderSpeichern } from "./felder-sperre.ts";
+import { eingabeNachAktion, fokusNachFehlschlag, gesperrtBisNeuGeladen, kurzNacheinanderSpeichern } from "./felder-sperre.ts";
 
 /**
  * Abschnitt von belege-steuern (#1742) mit eigenem Server und eigener Datenbank, parallel zu den anderen Abschnitten:
@@ -416,7 +417,7 @@ test("Dauerbeleg: Pausieren, Fortsetzen und Beenden fragen bei ungespeicherten �
   await page
     .locator("input[type=file]")
     .setInputFiles([{ name: "lagervertrag.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n% Lagervertrag Rückfrage\n%%EOF\n") }]);
-  await page.getByLabel(/^Das Dokument weist die Umsatzsteuer gesondert aus/).check();
+  await page.getByLabel(/^Weist die Umsatzsteuer gesondert aus/).check();
   await page.getByLabel("Netto 1").fill("80,00");
   await page.getByRole("button", { name: "Dauerbeleg anlegen" }).click();
   await page.waitForURL(/\/dauerbelege\/[0-9a-f-]{36}$/);
@@ -481,6 +482,46 @@ test("Dauerbeleg: Pausieren, Fortsetzen und Beenden fragen bei ungespeicherten �
   await page.getByRole("button", { name: "Löschen", exact: true }).click();
   await bestaetigen(page, "Vorlage löschen");
   await expect(page).toHaveURL(/\/dauerbelege(?:\?.*)?$/);
+});
+
+test("Dauerbeleg: Wechsel ohne Neuladen zu einem mit gleichem Zeitstempel zeigt dessen Angaben, die Meldung des vorigen geht (#1839)", async () => {
+  const sql = postgres(databaseUrlFuer(DURCHLAUF), { max: 1 });
+  const termin = day(30);
+  const betrag = (net: number) => JSON.stringify([{ taxRate: 1900, net, tax: Math.round(net * 0.19) }]);
+  const bezeichnung = page.getByLabel("Bezeichnung");
+  const lieferant = page.getByLabel("Lieferant", { exact: true });
+  const gespeichert = page.getByRole("status").filter({ hasText: "Gespeichert." });
+  try {
+    // Zwei pausierte Vorlagen ohne Datei in einer Anweisung, also mit demselben updated_at
+    await sql.begin(async (tx) => {
+      await tx`select set_config('haben.actor', 'e2e', true)`;
+      await tx`insert into recurring_documents (name, status, supplier_name, category, amounts, recurrence, anchor_day, start_date, next_date)
+        values ('Stellplatz Wechsel Nord', 'pausiert', 'Parkhaus Nord GmbH', 'miete', ${betrag(5000)}::jsonb, 'P1M', ${Number(termin.slice(8))}, ${termin}, ${termin}),
+          ('Stellplatz Wechsel Süd', 'pausiert', 'Parkhaus Süd GmbH', 'miete', ${betrag(7000)}::jsonb, 'P1M', ${Number(termin.slice(8))}, ${termin}, ${termin})`;
+    });
+    await go("/dauerbelege");
+    await ueberSchnellsuche(page, "Stellplatz Wechsel Nord", /Stellplatz Wechsel Nord/);
+    await expect(page.getByRole("heading", { level: 1, name: "Stellplatz Wechsel Nord" })).toBeVisible();
+    await expect(lieferant).toHaveValue("Parkhaus Nord GmbH");
+    await ueberSchnellsuche(page, "Stellplatz Wechsel Süd", /Stellplatz Wechsel Süd/);
+    await expect(page.getByRole("heading", { level: 1, name: "Stellplatz Wechsel Süd" })).toBeVisible();
+    await expect(bezeichnung).toHaveValue("Stellplatz Wechsel Süd");
+    await expect(lieferant).toHaveValue("Parkhaus Süd GmbH");
+    await expect(page.getByLabel("Netto 1")).toHaveValue("70,00");
+
+    // Gespeichert, dann zurück: Die Meldung gehört zur anderen Vorlage
+    await page.getByRole("button", { name: "Speichern", exact: true }).click();
+    await expect(gespeichert).toBeVisible();
+    await ueberSchnellsuche(page, "Stellplatz Wechsel Nord", /Stellplatz Wechsel Nord/);
+    await expect(bezeichnung).toHaveValue("Stellplatz Wechsel Nord");
+    await expect(gespeichert).toHaveCount(0);
+  } finally {
+    await sql.begin(async (tx) => {
+      await tx`select set_config('haben.actor', 'e2e', true)`;
+      await tx`delete from recurring_documents where name like 'Stellplatz Wechsel %'`;
+    });
+    await sql.end();
+  }
 });
 
 test("Beleg mit § 13b: Steuer selbst berechnet, gezahlt wird netto", async ({ browser }) => {
@@ -827,7 +868,7 @@ test("Dauerbeleg mit Bruttobetrag: Netto und Umsatzsteuer vorgerechnet, ohne aus
   await expect(page.getByLabel("Brutto 1", { exact: true })).toHaveCount(0);
   // Ein neuer Dauerbeleg beginnt mit 0 %; der Haken setzt den Satz auf 19 % (#1100)
   await expect(page.getByLabel("Steuersatz 1", { exact: true })).toHaveValue("0");
-  await page.getByLabel(/^Das Dokument weist die Umsatzsteuer gesondert aus/).check();
+  await page.getByLabel(/^Weist die Umsatzsteuer gesondert aus/).check();
   await expect(page.getByLabel("Steuersatz 1", { exact: true })).toHaveValue("1900");
   await page.getByLabel("Brutto 1", { exact: true }).fill("119,00");
   await expect(page.getByLabel("Netto 1", { exact: true })).toHaveValue("100,00");
@@ -848,32 +889,70 @@ test("Dauerbeleg mit Bruttobetrag: Netto und Umsatzsteuer vorgerechnet, ohne aus
   await expect(page).toHaveURL(/\/dauerbelege\/neu$/);
   // Haken aus nach einem Brutto: Grundlage ist wieder das Netto; ein anderer Satz rechnet es nicht aus dem verborgenen Brutto neu
   await page.getByLabel("Brutto 1", { exact: true }).fill("119,00");
-  await page.getByLabel(/^Das Dokument weist die Umsatzsteuer gesondert aus/).uncheck();
+  await page.getByLabel("Weist keine Umsatzsteuer aus").check();
   await page.getByLabel("Steuersatz 1", { exact: true }).selectOption("1900");
   await expect(page.getByLabel("Netto 1", { exact: true })).toHaveValue("111,21");
   // Haken wieder an: die nicht von Hand geänderte Steuer folgt dem Netto
-  await page.getByLabel(/^Das Dokument weist die Umsatzsteuer gesondert aus/).check();
+  await page.getByLabel(/^Weist die Umsatzsteuer gesondert aus/).check();
   await expect(page.getByLabel("Umsatzsteuer 1", { exact: true })).toHaveValue("21,13");
   // Haken aus und wieder an ändert ein eingegebenes Brutto nicht: 45,00 € zu 19 % sind 37,82 € + 7,18 € (aus dem Netto wären es 7,19 €)
   await page.getByLabel("Brutto 1", { exact: true }).fill("45,00");
   await expect(page.getByLabel("Umsatzsteuer 1", { exact: true })).toHaveValue("7,18");
-  await page.getByLabel(/^Das Dokument weist die Umsatzsteuer gesondert aus/).uncheck();
-  await page.getByLabel(/^Das Dokument weist die Umsatzsteuer gesondert aus/).check();
+  await page.getByLabel("Weist keine Umsatzsteuer aus").check();
+  await page.getByLabel(/^Weist die Umsatzsteuer gesondert aus/).check();
   await expect(page.getByLabel("Umsatzsteuer 1", { exact: true })).toHaveValue("7,18");
   await expect(page.getByLabel("Brutto 1", { exact: true })).toHaveValue("45,00");
   // Ohne Haken 100,00 € zu 0 %, dann Haken: 19 % und die Steuer aus dem Netto (#1100)
-  await page.getByLabel(/^Das Dokument weist die Umsatzsteuer gesondert aus/).uncheck();
+  await page.getByLabel("Weist keine Umsatzsteuer aus").check();
   await page.getByLabel("Steuersatz 1", { exact: true }).selectOption("0");
   await page.getByLabel("Netto 1", { exact: true }).fill("100,00");
-  await page.getByLabel(/^Das Dokument weist die Umsatzsteuer gesondert aus/).check();
+  await page.getByLabel(/^Weist die Umsatzsteuer gesondert aus/).check();
   await expect(page.getByLabel("Steuersatz 1", { exact: true })).toHaveValue("1900");
   await expect(page.getByLabel("Umsatzsteuer 1", { exact: true })).toHaveValue("19,00");
   await expect(page.getByLabel("Brutto 1", { exact: true })).toHaveValue("119,00");
   // 0 % bleibt mit Haken wählbar; Haken aus ändert den Satz nicht
   await page.getByLabel("Steuersatz 1", { exact: true }).selectOption("0");
   await expect(page.getByLabel("Umsatzsteuer 1", { exact: true })).toHaveValue("0,00");
-  await page.getByLabel(/^Das Dokument weist die Umsatzsteuer gesondert aus/).uncheck();
+  await page.getByLabel("Weist keine Umsatzsteuer aus").check();
   await expect(page.getByLabel("Steuersatz 1", { exact: true })).toHaveValue("0");
+});
+
+test("Dauerbeleg als Kleinbetragsrechnung: nur Endbetrag je Satz, höchstens 250 € je Termin, ein anderer Satz behält ihn (#1101)", async () => {
+  await go("/dauerbelege/neu");
+  await page.getByLabel("Bezeichnung").fill("Fachzeitschrift Abo");
+  await page.getByLabel("Lieferant", { exact: true }).fill("Fachverlag GmbH");
+  await waehleKategorie(page.getByLabel("Kategorie"), "software");
+  await page.getByLabel("Erster Beleg am").fill(day(30));
+  await page
+    .locator("input[type=file]")
+    .setInputFiles([{ name: "abo.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n% Fachzeitschrift Abo\n%%EOF\n") }]);
+  // Ohne Steuer eingetippt: Beim Wechsel bleibt der Betrag der Endbetrag; wie beim Steuerausweis springt 0 % auf 19 %
+  await page.getByLabel("Netto 1", { exact: true }).fill("11,90");
+  await page.getByLabel(/^Nennt nur Endbetrag und Steuersatz/).check();
+  const brutto = page.getByLabel("Brutto 1", { exact: true });
+  const summe = page.locator(".dauerbeleg-summe");
+  await expect(page.getByLabel("Steuersatz 1", { exact: true })).toHaveValue("1900");
+  await expect(page.getByLabel("Netto 1", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Umsatzsteuer 1", { exact: true })).toHaveCount(0);
+  await expect(brutto).toHaveValue("11,90");
+  // Netto und Steuer rechnet Haben aus dem Endbetrag (§ 35 Abs. 1 UStDV)
+  await expect(summe).toContainText(/10,00\s€ netto \+ 1,90\s€ Umsatzsteuer = 11,90\s€/);
+  // Über 250 € je Termin keine Kleinbetragsrechnung (§ 33 UStDV): die Meldung steht am Endbetrag
+  await brutto.fill("250,01");
+  await page.getByRole("button", { name: "Dauerbeleg anlegen" }).click();
+  await expect(brutto).toHaveAccessibleDescription(/nur bis 250 € brutto je Termin \(§ 33 UStDV\)/);
+  await expect(page).toHaveURL(/\/dauerbelege\/neu$/);
+  await brutto.fill("11,90");
+  await page.getByRole("button", { name: "Dauerbeleg anlegen" }).click();
+  await page.waitForURL(/\/dauerbelege\/[0-9a-f-]{36}$/);
+  // Gespeichert sind 10,00 € + 1,90 €, das folgt auch aus dem Netto; ein anderer Satz teilt trotzdem den Endbetrag neu auf
+  await expect(brutto).toHaveValue("11,90");
+  await page.getByLabel("Steuersatz 1", { exact: true }).selectOption("700");
+  await expect(brutto).toHaveValue("11,90");
+  await expect(summe).toContainText(/11,12\s€ netto \+ 0,78\s€ Umsatzsteuer = 11,90\s€/);
+  await page.getByRole("button", { name: "Löschen", exact: true }).click();
+  await bestaetigen(page, "Vorlage löschen");
+  await expect(page).toHaveURL(/\/dauerbelege(?:\?.*)?$/);
 });
 
 test("Beleg auf mehrere Kategorien aufteilen: Zeilen hinzufügen und entfernen, Summen gegen den Beleg", async ({ browser }) => {
@@ -1140,6 +1219,62 @@ test("Lieferant im Kontaktverzeichnis und im Beleg auswählen", async ({ browser
     await page.getByRole("button", { name: "Archivieren" }).click();
     await expect(page.getByRole("button", { name: "Wiederherstellen" })).toBeVisible();
   }
+});
+
+test("Beleg prüfen: Lieferant im Dialog anlegen speichert den Beleg nicht mit (#1835)", async ({ browser }) => {
+  await go("/belege");
+  await page
+    .locator("input[type=file][multiple]")
+    .setInputFiles([{ name: "kopierwerk.jpg", mimeType: "image/jpeg", buffer: await receiptJpeg(browser, "Kopierwerk Nord GmbH") }]);
+  await expect(page.getByText("kopierwerk.jpg: abgelegt.")).toBeVisible();
+  await page
+    .getByRole("link", { name: /kopierwerk\.jpg/ })
+    .first()
+    .click();
+  await page.waitForURL(/belege\/[0-9a-f-]{36}$/);
+  await page.waitForLoadState("networkidle");
+  const id = page.url().split("/").pop()!;
+  // Vollständig und gespeichert, danach eine Änderung: Ein Absenden des Belegs würde wirklich speichern
+  await page.getByLabel("Lieferant", { exact: true }).fill("Kopierwerk Nord GmbH");
+  await page.getByLabel("Rechnungsnummer").fill("KN-1");
+  await page.getByLabel("Belegdatum").fill(day(-4));
+  await waehleKategorie(page.getByLabel("Kategorie"), "telefon");
+  await page.getByRole("group", { name: "Beträge je Steuersatz" }).getByLabel("Brutto", { exact: true }).fill("119,00");
+  const speichern = page.getByRole("button", { name: "Speichern", exact: true });
+  await speichern.click();
+  await expect(speichern).toBeDisabled();
+  await page.getByLabel("Rechnungsnummer").fill("KN-2");
+  await expect(speichern).toBeEnabled();
+
+  const sql = postgres(databaseUrlFuer(DURCHLAUF), { max: 1 });
+  try {
+    const stand = async () => (await sql`select invoice_number, updated_at from documents where id = ${id}`)[0];
+    const vorher = await stand();
+    expect(vorher?.invoice_number).toBe("KN-1");
+    const dialog = page.getByRole("dialog", { name: "Neuen Lieferanten anlegen" });
+    await neuenLieferantenOeffnen(page);
+    await expect(dialog.getByLabel("Name oder Firma")).toHaveValue("Kopierwerk Nord GmbH");
+    const aufrufe = serverAufrufe(page);
+    await dialog.getByRole("button", { name: "Kontakt anlegen" }).click();
+    await expect(dialog).toBeHidden();
+    await aufrufe.fertig();
+    // Der neue Kontakt steht im Feld, die Änderung bleibt ungespeichert: Das Absenden im Dialog erreicht das Belegformular nicht
+    await expect(page.getByLabel("Lieferant", { exact: true })).toHaveAccessibleDescription("Aus den Kontakten gewählt.");
+    await expect(page.getByLabel("Rechnungsnummer")).toHaveValue("KN-2");
+    await expect(speichern).toBeEnabled();
+    expect(await stand()).toEqual(vorher);
+  } finally {
+    await sql.end();
+  }
+
+  // Nicht buchen: Beleg löschen und den Lieferanten archivieren, damit die folgenden Tests unverändert rechnen
+  await page.getByRole("button", { name: "Löschen", exact: true }).click();
+  await bestaetigen(page, "Beleg löschen");
+  await page.waitForURL(/\/belege$/);
+  await go("/kontakte?rolle=lieferant");
+  await page.getByRole("link", { name: /Kopierwerk Nord GmbH/ }).click();
+  await page.getByRole("button", { name: "Archivieren" }).click();
+  await expect(page.getByRole("button", { name: "Wiederherstellen" })).toBeVisible();
 });
 
 test("Dauerbeleg: Lieferanten suchen und direkt anlegen, ohne die Eingaben zu verlieren", async () => {
@@ -1669,6 +1804,61 @@ test("Beleg prüfen: Zuklappen und Wahl im selben Bild lassen „Weitere Angaben
   await page.getByRole("button", { name: "Löschen", exact: true }).click();
   await bestaetigen(page, "Beleg löschen");
   await expect(page).not.toHaveURL(belegUrl);
+});
+
+// Die vier Tests zu #1824 teilen sich einen Beleg und stehen am Ende: Der letzte bucht ihn, die Tests davor zählen offene Belege
+test("Beleg prüfen: Eingaben direkt nach dem Speichern bleiben erhalten (#1824)", async ({ browser }) => {
+  await go("/belege");
+  await page
+    .locator("input[type=file][multiple]")
+    .setInputFiles([{ name: "sperre.jpg", mimeType: "image/jpeg", buffer: await receiptJpeg(browser, "Papierhaus Sperre GmbH") }]);
+  await expect(page.getByText("sperre.jpg: abgelegt.")).toBeVisible();
+  await page
+    .getByRole("link", { name: /sperre\.jpg/ })
+    .first()
+    .click();
+  await page.waitForURL(/belege\/[0-9a-f-]{36}$/);
+  await page.waitForLoadState("networkidle");
+  const nummer = page.getByLabel("Rechnungsnummer");
+  await page.getByLabel("Lieferant", { exact: true }).fill("Papierhaus Sperre GmbH");
+  await nummer.fill("PS-0001");
+  await eingabeNachAktion(page, {
+    aktion: page.locator(".doc-actions").getByRole("button", { name: "Speichern" }),
+    feld: nummer,
+    text: "Gleich danach getippt",
+    // Vor dem ersten Speichern heißt die Seite „Neuer Beleg“
+    neuGeladen: page.getByRole("heading", { name: "Papierhaus Sperre GmbH", level: 1 }),
+  });
+});
+
+test("Beleg prüfen: Kurz nacheinander gespeichert, baut sich das Formular jedes Mal neu auf (#1824)", async () => {
+  // Der Beleg aus dem Test davor
+  await kurzNacheinanderSpeichern({
+    feld: page.getByLabel("Rechnungsnummer"),
+    speichern: page.locator(".doc-actions").getByRole("button", { name: "Speichern" }),
+    texte: ["PS-eins", "PS-zwei", "PS-drei"],
+  });
+});
+
+test("Beleg prüfen: Speichern schlägt fehl, der Fokus steht danach wieder im Feld (#1824)", async () => {
+  // Der Beleg aus den Tests davor; Enter speichert nur mit Änderungen, sonst ist „Speichern“ gesperrt
+  const nummer = page.getByLabel("Rechnungsnummer");
+  await nummer.fill("PS-Fehler");
+  await fokusNachFehlschlag(page, nummer);
+});
+
+test("Beleg prüfen: Nach dem Buchen werden die Felder bis zum Neuaufbau nicht frei (#1824)", async () => {
+  // Der Beleg aus den Tests davor; auf ihm bleiben, damit die Seite ihn neu lädt statt zum nächsten zu wechseln
+  await page.getByLabel("Belegdatum").fill(day(-2));
+  await waehleKategorie(page.getByLabel("Kategorie"), "buero");
+  await page.getByLabel("Netto", { exact: true }).fill("42,00");
+  await page.getByLabel("Nach dem Buchen zum nächsten offenen Beleg").uncheck();
+  await page.getByRole("button", { name: "Bestätigen und buchen" }).click();
+  await gesperrtBisNeuGeladen(page, {
+    aktion: page.getByRole("dialog").getByRole("button", { name: "Buchen", exact: true }),
+    feld: page.getByLabel("Rechnungsnummer"),
+    neuGeladen: page.getByText(/Gebucht .*festgeschrieben/),
+  });
 });
 
 test("Seiten mit den Daten dieses Abschnitts ohne axe-Verstöße", async () => {

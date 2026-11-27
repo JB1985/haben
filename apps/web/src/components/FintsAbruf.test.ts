@@ -1,5 +1,7 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { wartetAuf, zeilenGrund } from "./FintsAbruf.tsx";
+import { useFintsAbruf, wartetAuf, zeilenGrund } from "./FintsAbruf.tsx";
 
 // Die Server-Funktionen brauchen die Umgebung der App; geprüft werden hier nur die Sätze
 vi.mock("../server/functions/fints.ts", () => ({ cancelFints: {}, connectFints: {}, continueFints: {}, disconnectFints: {}, syncFints: {} }));
@@ -41,7 +43,7 @@ describe("Grund gesperrter FinTS-Knöpfe beim Trennen (#1677)", () => {
 
   it("nennt an den übrigen Zeilen alle Knöpfe, an der trennenden keinen", () => {
     expect(zeilenGrund(zweitbank, alle, trennt)).toEqual({
-      text: "„Trennen“ und „Jetzt abrufen“ gehen wieder, sobald die Verbindung zu Testbank …3001 getrennt ist.",
+      text: "„Trennen“, „Zugang ändern“ und „Jetzt abrufen“ gehen wieder, sobald die Verbindung zu Testbank …3001 getrennt ist.",
       trennen: true,
     });
     expect(zeilenGrund(zweiterZugang, alle, trennt)).toBeNull();
@@ -54,7 +56,7 @@ describe("Grund gesperrter FinTS-Knöpfe beim Trennen (#1677)", () => {
   it("nennt bei offenem Formular oben „Trennen“ in einem zweiten Satz", () => {
     expect(zeilenGrund(zweitbank, alle, { ...trennt, verbinden: true })).toEqual({
       text:
-        "„Jetzt abrufen“ geht wieder, sobald das Verbinden über FinTS oben fertig oder abgebrochen ist. " +
+        "„Zugang ändern“ und „Jetzt abrufen“ gehen wieder, sobald das Verbinden über FinTS oben fertig oder abgebrochen ist. " +
         "„Trennen“ geht wieder, sobald die Verbindung zu Testbank …3001 getrennt ist.",
       trennen: true,
     });
@@ -62,7 +64,7 @@ describe("Grund gesperrter FinTS-Knöpfe beim Trennen (#1677)", () => {
 
   it("ohne Trennen bleibt der Grund beim offenen Formular, wie er war", () => {
     expect(zeilenGrund(zweitbank, alle, { ...ruhig, verbinden: true })).toEqual({
-      text: "„Jetzt abrufen“ geht wieder, sobald das Verbinden über FinTS oben fertig oder abgebrochen ist.",
+      text: "„Zugang ändern“ und „Jetzt abrufen“ gehen wieder, sobald das Verbinden über FinTS oben fertig oder abgebrochen ist.",
       trennen: false,
     });
   });
@@ -70,23 +72,26 @@ describe("Grund gesperrter FinTS-Knöpfe beim Trennen (#1677)", () => {
 
 describe("Grund beim Trennen ohne FINTS_PRODUKT_ID (Review #1693)", () => {
   // Ohne Registrierungsnummer zeigt eine Zeile nur „Trennen“; der Grund darf keine Knöpfe nennen, die es nicht gibt
-  it("nennt an den übrigen Zeilen nur „Trennen“", async () => {
-    const { createElement } = await import("react");
-    const { renderToStaticMarkup } = await import("react-dom/server");
-    const { FintsAbruf } = await import("./FintsAbruf.tsx");
-    const html = renderToStaticMarkup(
-      createElement(FintsAbruf, {
-        fints: { configured: false, connections: [zweiterZugang, zweitbank, giro] } as never,
-        verbinden: false,
-        setVerbinden: () => {},
-        offen: null,
-        setOffen: () => {},
-        busy: "x-b",
-        setBusy: () => {},
-      }),
-    );
-    expect(html).not.toContain(">Jetzt abrufen<");
+  it("nennt an den übrigen Zeilen nur „Trennen“", () => {
+    const html = renderToStaticMarkup(createElement(Gruende, { connections: [zweiterZugang, zweitbank, giro], busy: "x-b" }));
     expect(html).toContain("„Trennen“ geht wieder, sobald die Verbindung zu Testbank …3001 getrennt ist.");
     expect(html).not.toContain("„Jetzt abrufen“");
+    expect(html).not.toContain("„Zugang ändern“");
   });
 });
+
+/** Gründe aller Zeilen ohne FINTS_PRODUKT_ID, wie die Seite Verbindungen sie aus dem Hook liest (#1951) */
+function Gruende({ connections, busy }: { connections: Verbindung[]; busy: string }) {
+  const f = useFintsAbruf({ configured: false, connections } as never, {
+    verbinden: false,
+    setVerbinden: () => {},
+    vorlage: null,
+    setVorlage: () => {},
+    neuVerbinden: () => {},
+    offen: null,
+    setOffen: () => {},
+    busy,
+    setBusy: () => {},
+  });
+  return createElement("p", null, connections.map((c) => f.grund(c)?.text ?? "").join(" | "));
+}

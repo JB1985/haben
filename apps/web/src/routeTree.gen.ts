@@ -37,6 +37,7 @@ import { Route as ApiHealthRouteImport } from './routes/api/health'
 import { Route as ApiKennzeichenRouteImport } from './routes/api/kennzeichen'
 import { Route as ApiLogoRouteImport } from './routes/api/logo'
 import { Route as ApiMcpRouteImport } from './routes/api/mcp'
+import { Route as ApiMetricsRouteImport } from './routes/api/metrics'
 import { Route as EinladungTokenRouteImport } from './routes/einladung.$token'
 import { Route as OauthAutorisierenRouteImport } from './routes/oauth/autorisieren'
 import { Route as DotwellKnownOauthProtectedResourceSplatRouteImport } from './routes/[.]well-known/oauth-protected-resource.$'
@@ -52,6 +53,7 @@ import { Route as AppArchivIndexRouteImport } from './routes/_app/archiv/index'
 import { Route as AppArtikelIndexRouteImport } from './routes/_app/artikel/index'
 import { Route as AppAuswertungenBwaRouteImport } from './routes/_app/auswertungen_.bwa'
 import { Route as AppAuswertungenLiquiditaetRouteImport } from './routes/_app/auswertungen_.liquiditaet'
+import { Route as AppBankVerbindungenRouteImport } from './routes/_app/bank_.verbindungen'
 import { Route as AppBelegeIndexRouteImport } from './routes/_app/belege/index'
 import { Route as AppBelegeIdRouteImport } from './routes/_app/belege/$id'
 import { Route as AppBuchungenIndexRouteImport } from './routes/_app/buchungen/index'
@@ -110,6 +112,7 @@ import { Route as ApiV1SplatRouteImport } from './routes/api/v1/$'
 import { Route as ApiVastIdRouteImport } from './routes/api/vast/$id'
 import { Route as AppArchivAuftragIdRouteImport } from './routes/_app/archiv/auftrag.$id'
 import { Route as AppArchivBelegIdRouteImport } from './routes/_app/archiv/beleg.$id'
+import { Route as AppBankVerbindenAnbieterRouteImport } from './routes/_app/bank_.verbinden.$anbieter'
 import { Route as AppLohnAnmeldungIndexRouteImport } from './routes/_app/lohn/anmeldung.index'
 import { Route as AppLohnAnmeldungZeitraumRouteImport } from './routes/_app/lohn/anmeldung.$zeitraum'
 import { Route as AppLohnBescheinigungJahrRouteImport } from './routes/_app/lohn/bescheinigung.$jahr'
@@ -274,6 +277,11 @@ const ApiMcpRoute = ApiMcpRouteImport.update({
   path: '/api/mcp',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiMetricsRoute = ApiMetricsRouteImport.update({
+  id: '/api/metrics',
+  path: '/api/metrics',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const EinladungTokenRoute = EinladungTokenRouteImport.update({
   id: '/einladung/$token',
   path: '/einladung/$token',
@@ -351,6 +359,11 @@ const AppAuswertungenLiquiditaetRoute =
     path: '/auswertungen/liquiditaet',
     getParentRoute: () => AppRoute,
   } as any)
+const AppBankVerbindungenRoute = AppBankVerbindungenRouteImport.update({
+  id: '/bank_/verbindungen',
+  path: '/bank/verbindungen',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppBelegeIndexRoute = AppBelegeIndexRouteImport.update({
   id: '/belege/',
   path: '/belege/',
@@ -643,6 +656,12 @@ const AppArchivBelegIdRoute = AppArchivBelegIdRouteImport.update({
   path: '/archiv/beleg/$id',
   getParentRoute: () => AppRoute,
 } as any)
+const AppBankVerbindenAnbieterRoute =
+  AppBankVerbindenAnbieterRouteImport.update({
+    id: '/bank_/verbinden/$anbieter',
+    path: '/bank/verbinden/$anbieter',
+    getParentRoute: () => AppRoute,
+  } as any)
 const AppLohnAnmeldungIndexRoute = AppLohnAnmeldungIndexRouteImport.update({
   id: '/lohn/anmeldung/',
   path: '/lohn/anmeldung/',
@@ -796,6 +815,7 @@ export interface FileRoutesByFullPath {
   '/api/kennzeichen': typeof ApiKennzeichenRoute
   '/api/logo': typeof ApiLogoRoute
   '/api/mcp': typeof ApiMcpRoute
+  '/api/metrics': typeof ApiMetricsRoute
   '/einladung/$token': typeof EinladungTokenRoute
   '/oauth/autorisieren': typeof OauthAutorisierenRoute
   '/.well-known/oauth-protected-resource/$': typeof DotwellKnownOauthProtectedResourceSplatRoute
@@ -806,6 +826,7 @@ export interface FileRoutesByFullPath {
   '/anlagen/neu': typeof AppAnlagenNeuRoute
   '/auswertungen/bwa': typeof AppAuswertungenBwaRoute
   '/auswertungen/liquiditaet': typeof AppAuswertungenLiquiditaetRoute
+  '/bank/verbindungen': typeof AppBankVerbindungenRoute
   '/belege/$id': typeof AppBelegeIdRoute
   '/buchungen/neu': typeof AppBuchungenNeuRoute
   '/dauerbelege/$id': typeof AppDauerbelegeIdRoute
@@ -869,6 +890,7 @@ export interface FileRoutesByFullPath {
   '/umsatzsteuer/': typeof AppUmsatzsteuerIndexRoute
   '/archiv/auftrag/$id': typeof AppArchivAuftragIdRoute
   '/archiv/beleg/$id': typeof AppArchivBelegIdRoute
+  '/bank/verbinden/$anbieter': typeof AppBankVerbindenAnbieterRoute
   '/lohn/anmeldung/$zeitraum': typeof AppLohnAnmeldungZeitraumRoute
   '/lohn/bescheinigung/$jahr': typeof AppLohnBescheinigungJahrRoute
   '/lohn/mitarbeiter/$id': typeof AppLohnMitarbeiterIdRoute
@@ -919,6 +941,7 @@ export interface FileRoutesByTo {
   '/api/kennzeichen': typeof ApiKennzeichenRoute
   '/api/logo': typeof ApiLogoRoute
   '/api/mcp': typeof ApiMcpRoute
+  '/api/metrics': typeof ApiMetricsRoute
   '/einladung/$token': typeof EinladungTokenRoute
   '/oauth/autorisieren': typeof OauthAutorisierenRoute
   '/': typeof AppIndexRoute
@@ -930,6 +953,7 @@ export interface FileRoutesByTo {
   '/anlagen/neu': typeof AppAnlagenNeuRoute
   '/auswertungen/bwa': typeof AppAuswertungenBwaRoute
   '/auswertungen/liquiditaet': typeof AppAuswertungenLiquiditaetRoute
+  '/bank/verbindungen': typeof AppBankVerbindungenRoute
   '/belege/$id': typeof AppBelegeIdRoute
   '/buchungen/neu': typeof AppBuchungenNeuRoute
   '/dauerbelege/$id': typeof AppDauerbelegeIdRoute
@@ -993,6 +1017,7 @@ export interface FileRoutesByTo {
   '/umsatzsteuer': typeof AppUmsatzsteuerIndexRoute
   '/archiv/auftrag/$id': typeof AppArchivAuftragIdRoute
   '/archiv/beleg/$id': typeof AppArchivBelegIdRoute
+  '/bank/verbinden/$anbieter': typeof AppBankVerbindenAnbieterRoute
   '/lohn/anmeldung/$zeitraum': typeof AppLohnAnmeldungZeitraumRoute
   '/lohn/bescheinigung/$jahr': typeof AppLohnBescheinigungJahrRoute
   '/lohn/mitarbeiter/$id': typeof AppLohnMitarbeiterIdRoute
@@ -1045,6 +1070,7 @@ export interface FileRoutesById {
   '/api/kennzeichen': typeof ApiKennzeichenRoute
   '/api/logo': typeof ApiLogoRoute
   '/api/mcp': typeof ApiMcpRoute
+  '/api/metrics': typeof ApiMetricsRoute
   '/einladung/$token': typeof EinladungTokenRoute
   '/oauth/autorisieren': typeof OauthAutorisierenRoute
   '/_app/': typeof AppIndexRoute
@@ -1056,6 +1082,7 @@ export interface FileRoutesById {
   '/_app/anlagen/neu': typeof AppAnlagenNeuRoute
   '/_app/auswertungen_/bwa': typeof AppAuswertungenBwaRoute
   '/_app/auswertungen_/liquiditaet': typeof AppAuswertungenLiquiditaetRoute
+  '/_app/bank_/verbindungen': typeof AppBankVerbindungenRoute
   '/_app/belege/$id': typeof AppBelegeIdRoute
   '/_app/buchungen/neu': typeof AppBuchungenNeuRoute
   '/_app/dauerbelege/$id': typeof AppDauerbelegeIdRoute
@@ -1119,6 +1146,7 @@ export interface FileRoutesById {
   '/_app/umsatzsteuer/': typeof AppUmsatzsteuerIndexRoute
   '/_app/archiv/auftrag/$id': typeof AppArchivAuftragIdRoute
   '/_app/archiv/beleg/$id': typeof AppArchivBelegIdRoute
+  '/_app/bank_/verbinden/$anbieter': typeof AppBankVerbindenAnbieterRoute
   '/_app/lohn/anmeldung/$zeitraum': typeof AppLohnAnmeldungZeitraumRoute
   '/_app/lohn/bescheinigung/$jahr': typeof AppLohnBescheinigungJahrRoute
   '/_app/lohn/mitarbeiter/$id': typeof AppLohnMitarbeiterIdRoute
@@ -1172,6 +1200,7 @@ export interface FileRouteTypes {
     | '/api/kennzeichen'
     | '/api/logo'
     | '/api/mcp'
+    | '/api/metrics'
     | '/einladung/$token'
     | '/oauth/autorisieren'
     | '/.well-known/oauth-protected-resource/$'
@@ -1182,6 +1211,7 @@ export interface FileRouteTypes {
     | '/anlagen/neu'
     | '/auswertungen/bwa'
     | '/auswertungen/liquiditaet'
+    | '/bank/verbindungen'
     | '/belege/$id'
     | '/buchungen/neu'
     | '/dauerbelege/$id'
@@ -1245,6 +1275,7 @@ export interface FileRouteTypes {
     | '/umsatzsteuer/'
     | '/archiv/auftrag/$id'
     | '/archiv/beleg/$id'
+    | '/bank/verbinden/$anbieter'
     | '/lohn/anmeldung/$zeitraum'
     | '/lohn/bescheinigung/$jahr'
     | '/lohn/mitarbeiter/$id'
@@ -1295,6 +1326,7 @@ export interface FileRouteTypes {
     | '/api/kennzeichen'
     | '/api/logo'
     | '/api/mcp'
+    | '/api/metrics'
     | '/einladung/$token'
     | '/oauth/autorisieren'
     | '/'
@@ -1306,6 +1338,7 @@ export interface FileRouteTypes {
     | '/anlagen/neu'
     | '/auswertungen/bwa'
     | '/auswertungen/liquiditaet'
+    | '/bank/verbindungen'
     | '/belege/$id'
     | '/buchungen/neu'
     | '/dauerbelege/$id'
@@ -1369,6 +1402,7 @@ export interface FileRouteTypes {
     | '/umsatzsteuer'
     | '/archiv/auftrag/$id'
     | '/archiv/beleg/$id'
+    | '/bank/verbinden/$anbieter'
     | '/lohn/anmeldung/$zeitraum'
     | '/lohn/bescheinigung/$jahr'
     | '/lohn/mitarbeiter/$id'
@@ -1420,6 +1454,7 @@ export interface FileRouteTypes {
     | '/api/kennzeichen'
     | '/api/logo'
     | '/api/mcp'
+    | '/api/metrics'
     | '/einladung/$token'
     | '/oauth/autorisieren'
     | '/_app/'
@@ -1431,6 +1466,7 @@ export interface FileRouteTypes {
     | '/_app/anlagen/neu'
     | '/_app/auswertungen_/bwa'
     | '/_app/auswertungen_/liquiditaet'
+    | '/_app/bank_/verbindungen'
     | '/_app/belege/$id'
     | '/_app/buchungen/neu'
     | '/_app/dauerbelege/$id'
@@ -1494,6 +1530,7 @@ export interface FileRouteTypes {
     | '/_app/umsatzsteuer/'
     | '/_app/archiv/auftrag/$id'
     | '/_app/archiv/beleg/$id'
+    | '/_app/bank_/verbinden/$anbieter'
     | '/_app/lohn/anmeldung/$zeitraum'
     | '/_app/lohn/bescheinigung/$jahr'
     | '/_app/lohn/mitarbeiter/$id'
@@ -1530,6 +1567,7 @@ export interface RootRouteChildren {
   ApiKennzeichenRoute: typeof ApiKennzeichenRoute
   ApiLogoRoute: typeof ApiLogoRoute
   ApiMcpRoute: typeof ApiMcpRoute
+  ApiMetricsRoute: typeof ApiMetricsRoute
   EinladungTokenRoute: typeof EinladungTokenRoute
   OauthAutorisierenRoute: typeof OauthAutorisierenRoute
   ApiAltbelegIdRoute: typeof ApiAltbelegIdRoute
@@ -1776,6 +1814,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMcpRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/metrics': {
+      id: '/api/metrics'
+      path: '/api/metrics'
+      fullPath: '/api/metrics'
+      preLoaderRoute: typeof ApiMetricsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/einladung/$token': {
       id: '/einladung/$token'
       path: '/einladung/$token'
@@ -1879,6 +1924,13 @@ declare module '@tanstack/react-router' {
       path: '/auswertungen/liquiditaet'
       fullPath: '/auswertungen/liquiditaet'
       preLoaderRoute: typeof AppAuswertungenLiquiditaetRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/bank_/verbindungen': {
+      id: '/_app/bank_/verbindungen'
+      path: '/bank/verbindungen'
+      fullPath: '/bank/verbindungen'
+      preLoaderRoute: typeof AppBankVerbindungenRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/belege/': {
@@ -2287,6 +2339,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppArchivBelegIdRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/bank_/verbinden/$anbieter': {
+      id: '/_app/bank_/verbinden/$anbieter'
+      path: '/bank/verbinden/$anbieter'
+      fullPath: '/bank/verbinden/$anbieter'
+      preLoaderRoute: typeof AppBankVerbindenAnbieterRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/lohn/anmeldung/': {
       id: '/_app/lohn/anmeldung/'
       path: '/lohn/anmeldung'
@@ -2469,6 +2528,7 @@ interface AppRouteChildren {
   AppAnlagenNeuRoute: typeof AppAnlagenNeuRoute
   AppAuswertungenBwaRoute: typeof AppAuswertungenBwaRoute
   AppAuswertungenLiquiditaetRoute: typeof AppAuswertungenLiquiditaetRoute
+  AppBankVerbindungenRoute: typeof AppBankVerbindungenRoute
   AppBelegeIdRoute: typeof AppBelegeIdRoute
   AppBuchungenNeuRoute: typeof AppBuchungenNeuRoute
   AppDauerbelegeIdRoute: typeof AppDauerbelegeIdRoute
@@ -2499,6 +2559,7 @@ interface AppRouteChildren {
   AppUmsatzsteuerIndexRoute: typeof AppUmsatzsteuerIndexRoute
   AppArchivAuftragIdRoute: typeof AppArchivAuftragIdRoute
   AppArchivBelegIdRoute: typeof AppArchivBelegIdRoute
+  AppBankVerbindenAnbieterRoute: typeof AppBankVerbindenAnbieterRoute
   AppLohnAnmeldungZeitraumRoute: typeof AppLohnAnmeldungZeitraumRoute
   AppLohnBescheinigungJahrRoute: typeof AppLohnBescheinigungJahrRoute
   AppLohnMitarbeiterIdRoute: typeof AppLohnMitarbeiterIdRoute
@@ -2537,6 +2598,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppAnlagenNeuRoute: AppAnlagenNeuRoute,
   AppAuswertungenBwaRoute: AppAuswertungenBwaRoute,
   AppAuswertungenLiquiditaetRoute: AppAuswertungenLiquiditaetRoute,
+  AppBankVerbindungenRoute: AppBankVerbindungenRoute,
   AppBelegeIdRoute: AppBelegeIdRoute,
   AppBuchungenNeuRoute: AppBuchungenNeuRoute,
   AppDauerbelegeIdRoute: AppDauerbelegeIdRoute,
@@ -2568,6 +2630,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppUmsatzsteuerIndexRoute: AppUmsatzsteuerIndexRoute,
   AppArchivAuftragIdRoute: AppArchivAuftragIdRoute,
   AppArchivBelegIdRoute: AppArchivBelegIdRoute,
+  AppBankVerbindenAnbieterRoute: AppBankVerbindenAnbieterRoute,
   AppLohnAnmeldungZeitraumRoute: AppLohnAnmeldungZeitraumRoute,
   AppLohnBescheinigungJahrRoute: AppLohnBescheinigungJahrRoute,
   AppLohnMitarbeiterIdRoute: AppLohnMitarbeiterIdRoute,
@@ -2612,6 +2675,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiKennzeichenRoute: ApiKennzeichenRoute,
   ApiLogoRoute: ApiLogoRoute,
   ApiMcpRoute: ApiMcpRoute,
+  ApiMetricsRoute: ApiMetricsRoute,
   EinladungTokenRoute: EinladungTokenRoute,
   OauthAutorisierenRoute: OauthAutorisierenRoute,
   ApiAltbelegIdRoute: ApiAltbelegIdRoute,

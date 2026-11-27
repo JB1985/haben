@@ -53,6 +53,7 @@ function invoiceOut(row: ListRow, invoice: Invoice, lines: InvoiceLine[], baseUr
   return {
     ...summaryOut(row, baseUrl),
     correctsId: invoice.correctsId,
+    replacesInvoiceId: invoice.replacesInvoiceId,
     serviceFrom: invoice.serviceFrom,
     serviceTo: invoice.serviceTo,
     paymentTermDays: invoice.paymentTermDays,
@@ -105,7 +106,8 @@ async function respondWith(id: string, request: ApiRequest, status = 200, header
   return ok(invoiceOut(loaded.row, loaded.invoice, loaded.lines, request.baseUrl), status, headers);
 }
 
-async function contactProblem(contactId: string | null | undefined): Promise<ApiResult | null> {
+/** Unbekannter Kontakt als 422; ob er Kunde ist, prüft das Modul beim Schreiben */
+export async function contactProblem(contactId: string | null | undefined): Promise<ApiResult | null> {
   if (!contactId || (await getContact(contactId))) return null;
   return fail("unprocessable", "Kontakt nicht gefunden. Erst über /kontakte anlegen.");
 }
@@ -177,14 +179,15 @@ export async function updateInvoiceHandler(request: ApiRequest): Promise<ApiResu
   if (!found) return notFound(INVOICE_NOT_FOUND);
   const { invoice, lines } = found;
   if (invoice.status !== "draft") return fail("conflict", LOCKED);
-  if (invoice.kind !== "rechnung" || invoice.variant || invoice.quoteId) {
+  if (invoice.kind !== "rechnung" || invoice.variant || (invoice.quoteId && !invoice.replacesInvoiceId)) {
     return fail("conflict", "Storno, Korrektur, Abschlags- und Schlussrechnung sowie Rechnungen zu einem Angebot bitte in Haben bearbeiten.");
   }
   const body = request.body as Record<string, unknown>;
   const merged = { ...draftInputOf(invoice, lines), ...body };
   // Ein Ansprechpartner gehört zu genau einem Kunden (#424): Wechselt der Kunde, entfällt die Person, die jemand in Haben gewählt hat;
   // die API selbst setzt keine
-  if ("contactId" in body && body.contactId !== invoice.contactId) merged.contactPersonId = null;
+  // Ebenso die Bankverbindung (#1887): Ohne Angabe gilt dann die Vorgabe des neuen Kunden (bankverbindungFuerEntwurf)
+  if ("contactId" in body && body.contactId !== invoice.contactId) Object.assign(merged, { contactPersonId: null, bankverbindungId: undefined });
   // Ohne Angabe passt sich das Skonto an wie beim Anlegen, damit ein Client ohne Skonto Zahlungsziel und Währung ändern
   // kann: Fristen über das neue Zahlungsziel hinaus entfallen, in Fremdwährung keins
   if (!("skonto" in body)) {

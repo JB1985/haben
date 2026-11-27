@@ -6,20 +6,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({
   data: {} as Record<string, unknown>,
   einrichtung: null as { fehlt: boolean; offen: ("rechtsform" | "kleinunternehmer")[] } | null,
+  ausgeblendet: [] as string[],
 }));
 vi.mock("../../server/functions/backup.ts", () => ({}));
 vi.mock("../../server/functions/invoices.ts", () => ({}));
 vi.mock("../../server/functions/vat.ts", () => ({}));
+vi.mock("../../server/functions/finanzamt.ts", () => ({ markPostfachDocument: () => undefined }));
+vi.mock("@tanstack/react-start", () => ({ useServerFn: (fn: unknown) => fn }));
 vi.mock("@tanstack/react-router", () => ({
+  useRouteContext: () => ({ ausgeblendet: state.ausgeblendet }),
   createFileRoute: () => (options: unknown) => ({
     options,
     useLoaderData: () => state.data,
     useRouteContext: () => ({ einrichtung: state.einrichtung }),
   }),
+  // Die Seite nutzt den Router nur zum Neuladen nach dem Abhaken eines Bescheids
+  useRouter: () => ({ invalidate: async () => undefined }),
   // Mit id setzt der Link sie ein, damit ein Test das Ziel sieht (Kontakt einer Aufgabe); andere Parameter bleiben stehen
   Link: ({ children, to, params, className }: { children: ReactNode; to: string; params?: { id?: string }; className?: string }) =>
     createElement("a", { href: params?.id ? to.replace("$id", params.id) : to, className }, children),
 }));
+import { EricHinweis } from "../../components/EricHinweis.tsx";
 import { Route } from "./index.tsx";
 
 function fixture() {
@@ -56,6 +63,7 @@ function fixture() {
   };
 }
 
+const hinweis = renderToStaticMarkup(createElement(EricHinweis));
 const render = () => renderToStaticMarkup(createElement(Route.options.component as ComponentType));
 
 describe("Übersicht: relevante Voranmeldungshinweise (#691)", () => {
@@ -67,7 +75,7 @@ describe("Übersicht: relevante Voranmeldungshinweise (#691)", () => {
     const html = render();
     expect(html).not.toContain("Voranmeldung Oktober 2026");
     expect(html).not.toContain("USt-Zahllast");
-    expect(html).not.toContain("ERiC ist nicht eingerichtet");
+    expect(html).not.toContain(hinweis);
     expect(html).not.toContain("Letzte Voranmeldungen");
     expect(html).not.toContain("ELSTER-Zertifikat");
     expect(html).toContain("Neue Rechnung");
@@ -80,7 +88,7 @@ describe("Übersicht: relevante Voranmeldungshinweise (#691)", () => {
     expect(html).toContain("Voranmeldung Oktober 2026 senden");
     expect(html).toContain("Voranmeldung fällig 10.11.2026");
     expect(html).toContain("USt-Zahllast Oktober 2026");
-    expect(html).toContain("ERiC ist nicht eingerichtet");
+    expect(html).toContain(hinweis);
   });
 
   it("bei Befreiung ohne vorhandene Anmeldung entsteht keine Voranmeldungsaufforderung", () => {
@@ -89,7 +97,7 @@ describe("Übersicht: relevante Voranmeldungshinweise (#691)", () => {
     const html = render();
     expect(html).not.toContain("Voranmeldung Oktober 2026");
     expect(html).not.toContain("USt-Zahllast");
-    expect(html).not.toContain("ERiC ist nicht eingerichtet");
+    expect(html).not.toContain(hinweis);
   });
 
   it("vorhandene übermittelte Anmeldung bleibt auch für einen Kleinunternehmer erreichbar", () => {
@@ -101,6 +109,8 @@ describe("Übersicht: relevante Voranmeldungshinweise (#691)", () => {
     expect(html).toContain("19,00");
     expect(html).not.toContain("Voranmeldung Oktober 2026 senden");
     expect(html).not.toContain("Voranmeldung fällig");
+    // Weg 2 aus #1857: Der Zeitraum bleibt, wie er ist, die Übersicht sagt aber, dass er abgegeben ist
+    expect(html).toContain("Voranmeldung Oktober 2026 · abgegeben");
   });
 
   it("offene Zahllast einer älteren Anmeldung bleibt sichtbar, ohne eine neue Aufgabe zu erfinden", () => {
@@ -119,6 +129,30 @@ describe("Übersicht: relevante Voranmeldungshinweise (#691)", () => {
     expect(html).toContain("/umsatzsteuer/$zeitraum");
     expect(html).not.toContain("Voranmeldung Oktober 2026 senden");
     expect(html).not.toContain("Voranmeldung fällig");
+  });
+});
+
+describe("Übersicht: ausgeblendete Bereiche", () => {
+  beforeEach(() => {
+    state.data = fixture();
+    (state.data.invoices as { overdueCount: number }).overdueCount = 2;
+    state.ausgeblendet = [];
+  });
+  afterEach(() => {
+    state.ausgeblendet = [];
+  });
+
+  it("zeigt sonst „Neue Rechnung“ und führt Überfälliges ins Mahnwesen", () => {
+    const html = render();
+    expect(html).toContain("Neue Rechnung");
+    expect(html).toContain(`href="/rechnungen/mahnwesen"`);
+  });
+
+  it("lässt ohne „Rechnungen schreiben“ die Knöpfe weg und führt ohne Mahnwesen zu den Rechnungen", () => {
+    state.ausgeblendet = ["rechnungserstellung", "mahnwesen"];
+    const html = render();
+    expect(html).toMatch(/<a [^>]*href="\/rechnungen"[^>]*>(?:(?!<\/a>)[\s\S])*2 Rechnungen überfällig(?:(?!<\/a>)[\s\S])*Ansehen/);
+    for (const fehlt of ["Neue Rechnung", "Erste Rechnung schreiben", "/rechnungen/neu", "/rechnungen/mahnwesen", "Mahnen"]) expect(html).not.toContain(fehlt);
   });
 });
 
@@ -226,7 +260,18 @@ describe("Übersicht: Aufbau", () => {
     state.data.current = { status: "sent", kz83: 1900, sentAt: "2026-11-09T12:00:00Z" };
     const html = render();
     expect(html).toContain('class="btn btn-ghost"');
-    expect(html).toContain("Voranmeldung Oktober 2026</a>");
+    // #1857 Weg 2: Der Zeitraum bleibt, die Übersicht sagt aber, dass er abgegeben ist
+    expect(html).toContain("Voranmeldung Oktober 2026 · abgegeben</a>");
+  });
+
+  it("vierteljährlich gesendet: das Quartal trägt den Zusatz, ein Entwurf nicht (#1857)", () => {
+    state.data.period = { year: 2026, month: 43 };
+    state.data.current = { status: "sent", kz83: 1900, sentAt: "2026-10-09T12:00:00Z" };
+    expect(render()).toContain("Voranmeldung 3. Quartal 2026 · abgegeben</a>");
+    state.data.current = { status: "draft", kz83: 1900, sentAt: null };
+    const html = render();
+    expect(html).toContain("Voranmeldung 3. Quartal 2026</a>");
+    expect(html).not.toContain("abgegeben");
   });
 
   it("leere Instanz: Knopf „Erste Rechnung schreiben“, keine Karten mit 0,00 €", () => {
