@@ -312,3 +312,77 @@ test("Aus dem Postfach: ein Storno übernehmen erledigt den Eintrag", async () =
     await sql.end();
   }
 });
+
+/** Leere Liste, die genannten PDFs warten, und das Formular des ersten ist ausgefüllt, aber noch nicht abgeschickt */
+async function postfachFormular(sql: postgres.Sql, seite: Page, nummern: string[], knopf: string): Promise<void> {
+  await sql`delete from inbox_outgoing`;
+  for (const nummer of nummern) await imPostfachAblegen(sql, nummer);
+  await gehe(seite, "/rechnungen");
+  await seite.getByRole("region", { name: "Aus dem Postfach" }).getByRole("button", { name: knopf }).click();
+  await expect(seite.getByRole("form", { name: "Angaben zur Rechnung" })).toBeVisible();
+}
+
+async function ausfuellen(seite: Page, nummer: string): Promise<void> {
+  await seite.getByLabel("Rechnungsnummer").fill(nummer);
+  await seite.getByLabel("Rechnungsdatum").fill(day(-20));
+  await seite.getByLabel("Fällig am").fill(day(-6));
+  await seite.getByLabel("Netto 1 (€)").fill("100,00");
+  await seite.getByLabel("Steuer 1 (€)").fill("19,00");
+  await kundeWaehlen(seite, KUNDE);
+}
+
+const absenden = (seite: Page) => seite.getByRole("button", { name: "Übernehmen", exact: true }).click();
+
+const mitDatenbank = async (run: (sql: postgres.Sql) => Promise<void>) => {
+  const sql = postgres(databaseUrlFuer("fremdrechnung"), { max: 2, onnotice: () => {} });
+  try {
+    await run(sql);
+  } finally {
+    await sql.end();
+  }
+};
+
+test("Aus dem Postfach: lässt sich der Eintrag nicht als übernommen markieren, entsteht auch keine Rechnung", async () => {
+  await mitDatenbank(async (sql) => {
+    await postfachFormular(sql, page, ["AB-1"], "Übernehmen AB-1");
+    await ausfuellen(page, "AB-1");
+    // Abbruch zwischen Buchen und Markieren: das Markieren scheitert in der Datenbank
+    await sql`alter table inbox_outgoing add constraint test_markieren check (status <> 'uebernommen')`;
+    try {
+      await absenden(page);
+      await expect(page.getByRole("alert")).toBeVisible();
+      const [rechnungen] = await sql`select count(*)::int as n from invoices where number = 'AB-1'`;
+      expect(rechnungen!.n).toBe(0);
+    } finally {
+      await sql`alter table inbox_outgoing drop constraint test_markieren`;
+    }
+  });
+});
+
+test("Aus dem Postfach: zwei Fenster übernehmen dieselbe Datei gleichzeitig, es entsteht nur eine Rechnung", async () => {
+  await mitDatenbank(async (sql) => {
+    await postfachFormular(sql, page, ["GL-1"], "Übernehmen GL-1");
+    const zweite = await page.context().newPage();
+    try {
+      await gehe(zweite, "/rechnungen");
+      await zweite.getByRole("region", { name: "Aus dem Postfach" }).getByRole("button", { name: "Übernehmen GL-1" }).click();
+      await ausfuellen(page, "GL-1a");
+      await ausfuellen(zweite, "GL-1b");
+      // Beide Anfragen kommen an der Prüfung vorbei und warten dann an der Sperre
+      await sql.begin(async (tx) => {
+        await tx`lock table invoices in exclusive mode`;
+        await absenden(page);
+        await absenden(zweite);
+        await expect
+          .poll(async () => (await sql`select count(*)::int as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'`)[0]!.n)
+          .toBeGreaterThanOrEqual(2);
+      });
+      const fertig = async (seite: Page) => /rechnungen\/[0-9a-f-]{36}$/.test(seite.url()) || (await seite.getByRole("alert").count()) > 0;
+      await expect.poll(async () => (await fertig(page)) && (await fertig(zweite))).toBe(true);
+      const rechnungen = await sql`select number from invoices where number in ('GL-1a', 'GL-1b')`;
+      expect(rechnungen).toHaveLength(1);
+    } finally {
+      await zweite.close();
+    }
+  });
+});
