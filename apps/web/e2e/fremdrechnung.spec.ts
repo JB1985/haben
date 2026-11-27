@@ -386,3 +386,27 @@ test("Aus dem Postfach: zwei Fenster übernehmen dieselbe Datei gleichzeitig, es
     }
   });
 });
+
+test("Aus dem Postfach: wer eine Reihe abbricht, sieht die schon übernommene Rechnung in der Liste", async () => {
+  await mitDatenbank(async (sql) => {
+    await postfachFormular(sql, page, ["RH-1", "RH-2"], "Alle übernehmen");
+    await ausfuellen(page, "RH-1");
+    await absenden(page);
+    await expect(page.getByText("Aus dem Postfach:")).toContainText("Rechnung-RH-2.pdf");
+    await page.getByRole("button", { name: "Abbrechen" }).click();
+    await expect(page.getByRole("region", { name: "Aus dem Postfach" }).getByText("1 offen")).toBeVisible();
+    await expect(page.getByRole("link", { name: /RH-1/ })).toBeVisible();
+  });
+});
+
+test("Aus dem Postfach: wartet die nächste Datei der Reihe nicht mehr, steht die Meldung da und das erledigte Formular ist zu", async () => {
+  await mitDatenbank(async (sql) => {
+    await postfachFormular(sql, page, ["RW-1", "RW-2", "RW-3"], "Alle übernehmen");
+    await ausfuellen(page, "RW-1");
+    // In einem anderen Fenster verworfen
+    await sql`update inbox_outgoing set status = 'verworfen' where filename = 'Rechnung-RW-2.pdf'`;
+    await absenden(page);
+    await expect(page.getByRole("region", { name: "Aus dem Postfach" })).toContainText("wartet nicht mehr");
+    await expect(page.getByRole("form", { name: "Angaben zur Rechnung" })).toHaveCount(0);
+  });
+});
