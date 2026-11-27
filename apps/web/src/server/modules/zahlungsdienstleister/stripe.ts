@@ -75,6 +75,9 @@ const configSchema = z
   .strict();
 type StripeConfig = z.infer<typeof configSchema>;
 
+const OHNE_LESERECHT =
+  "Der Schlüssel darf Zahlungen nicht lesen: Die Umsätze kämen ohne die Metadaten an und bekämen sie nicht nachträglich. Gib ihm vor dem nächsten Abruf Lesezugriff auf Zahlungen und Erstattungen.";
+
 export const stripeAdapter: PspAdapter<StripeZugang, StripeConfig> = {
   provider: "stripe",
   name: "Stripe",
@@ -95,7 +98,7 @@ export const stripeAdapter: PspAdapter<StripeZugang, StripeConfig> = {
       art: "text",
       config: true,
       standard: "",
-      hint: "Schlüssel durch Komma getrennt, etwa invoice_number; ihre Werte stehen in dieser Reihenfolge im Zweck neuer Umsätze. Leer: wie beim CSV-Export. Braucht zusätzlich Lesezugriff auf Zahlungen.",
+      hint: "Schlüssel durch Komma getrennt, etwa invoice_number; ihre Werte stehen in dieser Reihenfolge im Zweck neuer Umsätze. Leer: wie beim CSV-Export. Braucht zusätzlich Lesezugriff auf Zahlungen und Erstattungen.",
     },
   ],
   // Vor #1729 lag der Schlüssel als Text in stripe_connections; die Migration hat ihn so übernommen
@@ -114,9 +117,13 @@ export const stripeAdapter: PspAdapter<StripeZugang, StripeConfig> = {
     }
     return { art: "schluessel", apiKey };
   },
-  async pruefen(zugang) {
+  async pruefen(zugang, config) {
     try {
-      return { accountId: await clientFor(zugang.apiKey).accountId(), keyHint: zugang.apiKey.slice(-4) };
+      const client = clientFor(zugang.apiKey);
+      const accountId = await client.accountId();
+      // Vor dem ersten Abruf: Ohne das Recht kämen die Umsätze ohne Metadaten und bekämen sie nicht nachträglich (#1915)
+      const fehlt = stripeMetadatenSchluessel(config.metadataKeys ?? "").length > 0 && !(await client.darfZahlungenLesen());
+      return { accountId, keyHint: zugang.apiKey.slice(-4), ...(fehlt ? { hinweise: [OHNE_LESERECHT] } : {}) };
     } catch (error) {
       throw new StripeError(`Stripe nimmt den Schlüssel nicht an: ${error instanceof Error ? error.message : String(error)}`);
     }

@@ -160,12 +160,16 @@ function normalize(raw: z.infer<typeof balanceTransactionSchema>): StripeBalance
 
 const listSchema = z.looseObject({ data: z.array(balanceTransactionSchema), has_more: z.boolean() });
 const accountSchema = z.looseObject({ id: z.string() });
+const anyListSchema = z.looseObject({ data: z.array(z.unknown()) });
 
 /** Schutz gegen eine Endlosschleife; bei 100 je Seite sind das eine Million Bewegungen */
 const MAX_PAGES = 10_000;
 const PAGE_SIZE = 100;
 /** Wiederholungen lesender Abrufe bei 429/502/503/504 und Netzwerkfehlern */
 const MAX_RETRIES = 3;
+
+/** Was der Abruf aufklappt */
+const EXPAND = ["data.source", "data.source.charge"];
 
 const startOfDay = (date: string) => Math.floor(Date.parse(`${date}T00:00:00Z`) / 1000);
 
@@ -217,6 +221,24 @@ export class StripeClient {
     }
   }
 
+  /**
+   * Ob der Schlüssel Zahlungen lesen darf, ohne etwas abzurufen, das übernommen wird: die Liste der Zahlungen
+   * (https://docs.stripe.com/api/charges/list), auch bei einem Konto ohne Bewegungen, und die jüngsten Balance Transactions
+   * so aufgeklappt wie beim Abruf. `false` bei 403, andere Fehler gehen an den Aufrufer.
+   */
+  async darfZahlungenLesen(): Promise<boolean> {
+    const query = new URLSearchParams({ limit: String(PAGE_SIZE) });
+    for (const feld of EXPAND) query.append("expand[]", feld);
+    try {
+      await this.#json("/v1/charges?limit=1", anyListSchema);
+      await this.#json(`/v1/balance_transactions?${query}`, listSchema);
+      return true;
+    } catch (error) {
+      if (error instanceof StripeApiError && error.status === 403) return false;
+      throw error;
+    }
+  }
+
   async #alle(dateFrom: string, dateTo: string, details: boolean): Promise<StripeBalanceTransaction[]> {
     const all: StripeBalanceTransaction[] = [];
     const seen = new Set<string>();
@@ -230,10 +252,7 @@ export class StripeClient {
       });
       // `source` klappt bei einer Zahlung den Charge mit Name, E-Mail und Beschreibung des Kunden auf, `source.charge`
       // bei Erstattung und Streit die Zahlung, auf die sie sich beziehen. Andere Arten haben keinen Charge.
-      if (details) {
-        query.append("expand[]", "data.source");
-        query.append("expand[]", "data.source.charge");
-      }
+      if (details) for (const feld of EXPAND) query.append("expand[]", feld);
       if (startingAfter) query.set("starting_after", startingAfter);
       const result = await this.#json(`/v1/balance_transactions?${query}`, listSchema);
       // Eine Bewegung, die auf zwei Seiten steht, zählt einmal; der Importvertrag lehnte sonst die ganze Lieferung ab
