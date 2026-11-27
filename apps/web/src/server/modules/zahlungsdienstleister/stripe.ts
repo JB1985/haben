@@ -78,6 +78,21 @@ type StripeConfig = z.infer<typeof configSchema>;
 const OHNE_LESERECHT =
   "Der Schlüssel darf Zahlungen nicht lesen: Die Umsätze kämen ohne die Metadaten an und bekämen sie nicht nachträglich. Gib ihm vor dem nächsten Abruf Lesezugriff auf Zahlungen und Erstattungen.";
 
+/**
+ * Vor dem ersten Abruf: Ohne das Recht kämen die Umsätze ohne Metadaten und bekämen sie nicht nachträglich (#1915). Scheitert
+ * nur diese Frage (Netz, Grenze für Anfragen, Störung), hat Stripe den Schlüssel schon angenommen: Hinweis statt Ablehnung.
+ */
+async function leserechtHinweise(client: StripeClient): Promise<string[]> {
+  try {
+    return (await client.darfZahlungenLesen()) ? [] : [OHNE_LESERECHT];
+  } catch (error) {
+    const grund = error instanceof Error ? error.message : String(error);
+    return [
+      `Ob der Schlüssel Zahlungen lesen darf, ließ sich nicht prüfen (${grund}). Ohne das Recht kämen die Umsätze ohne die Metadaten an und bekämen sie nicht nachträglich: Prüfe den Zugang vor dem ersten Abruf noch einmal.`,
+    ];
+  }
+}
+
 export const stripeAdapter: PspAdapter<StripeZugang, StripeConfig> = {
   provider: "stripe",
   name: "Stripe",
@@ -121,9 +136,8 @@ export const stripeAdapter: PspAdapter<StripeZugang, StripeConfig> = {
     try {
       const client = clientFor(zugang.apiKey);
       const accountId = await client.accountId();
-      // Vor dem ersten Abruf: Ohne das Recht kämen die Umsätze ohne Metadaten und bekämen sie nicht nachträglich (#1915)
-      const fehlt = stripeMetadatenSchluessel(config.metadataKeys ?? "").length > 0 && !(await client.darfZahlungenLesen());
-      return { accountId, keyHint: zugang.apiKey.slice(-4), ...(fehlt ? { hinweise: [OHNE_LESERECHT] } : {}) };
+      const hinweise = stripeMetadatenSchluessel(config.metadataKeys ?? "").length > 0 ? await leserechtHinweise(client) : [];
+      return { accountId, keyHint: zugang.apiKey.slice(-4), ...(hinweise.length > 0 ? { hinweise } : {}) };
     } catch (error) {
       throw new StripeError(`Stripe nimmt den Schlüssel nicht an: ${error instanceof Error ? error.message : String(error)}`);
     }
