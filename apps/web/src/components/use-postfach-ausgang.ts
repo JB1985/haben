@@ -54,6 +54,8 @@ export function usePostfachAusgang() {
       setDanach(ids.length > 1 ? rest : null);
     } catch (e) {
       setError(meldung(e, "Die Datei lässt sich nicht lesen."));
+      // In einer Reihe steht noch das erledigte Formular da und verdeckt die Meldung
+      schliessen();
     } finally {
       setBusy(false);
     }
@@ -85,16 +87,17 @@ export function usePostfachAusgang() {
 
   /** Nach einer übernommenen Rechnung der Reihe: die nächste öffnen, nach der letzten die Liste neu laden */
   function weiter() {
-    if (danach && danach.length > 0) return void oeffnen(danach);
-    setOffen(null);
-    void laden();
+    if (!danach || danach.length === 0) return schliessen();
     void router.invalidate();
+    void oeffnen(danach);
   }
 
   function schliessen() {
     setOffen(null);
     setDanach(null);
     void laden();
+    // In einer Reihe sind schon Rechnungen dazugekommen
+    void router.invalidate();
   }
 
   const umschalten = (id: string) =>
