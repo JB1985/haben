@@ -45,7 +45,7 @@ const go = (path: string) => gehe(page, path);
 
 test("Artikelkatalog: anlegen und im Rechnungseditor einfügen", async () => {
   await go("/artikel");
-  await page.getByRole("button", { name: "Neuer Artikel" }).click();
+  await page.locator(".page-head").getByRole("button", { name: "Neuer Artikel" }).click();
   const form = page.getByRole("form", { name: "Neuer Artikel" });
   await form.getByLabel("Bezeichnung").fill("Beratung Softwarearchitektur");
   await form.getByLabel("Artikelnummer (optional)").fill("B-01");
@@ -114,7 +114,7 @@ test("Eigene Einheiten: in den Einstellungen anlegen, im Artikel und in der Rech
   await expect(karte.getByRole("row", { name: /m² \(archiviert\)/ })).toBeVisible();
 
   await go("/artikel");
-  await page.getByRole("button", { name: "Neuer Artikel" }).click();
+  await page.locator(".page-head").getByRole("button", { name: "Neuer Artikel" }).click();
   const form = page.getByRole("form", { name: "Neuer Artikel" });
   await expect(form.getByLabel("Einheit").locator("option", { hasText: "m²" })).toHaveCount(0);
   await form.getByLabel("Bezeichnung").fill("Nachhilfe Mathematik");
@@ -143,7 +143,7 @@ test("Eigene Einheiten: in den Einstellungen anlegen, im Artikel und in der Rech
 
 test("Positionstext: Artikel mit Bezeichnung und Text, die Vorschau zeigt beides", async () => {
   await go("/artikel");
-  await page.getByRole("button", { name: "Neuer Artikel" }).click();
+  await page.locator(".page-head").getByRole("button", { name: "Neuer Artikel" }).click();
   const form = page.getByRole("form", { name: "Neuer Artikel" });
   await form.getByLabel("Bezeichnung").fill("Website-Relaunch");
   await form.getByLabel("Text zur Position (optional)").fill("Konzeption, Design und Umsetzung");
@@ -194,7 +194,7 @@ test("Positionstext: ein einzeiliger Artikel lässt bei der Auswahl den eigenen 
 
 test("Textbausteine: Kopftext für einen Kunden anlegen und im Rechnungseditor einfügen", async () => {
   await go("/textbausteine");
-  await page.getByRole("button", { name: "Neuer Textbaustein" }).click();
+  await page.locator(".page-head").getByRole("button", { name: "Neuer Textbaustein" }).click();
   const form = page.getByRole("form", { name: "Neuer Textbaustein" });
   await form.getByLabel("Bezeichnung").fill("Bestellnummer Nordwerk");
   await form.getByRole("textbox", { name: "Text", exact: true }).fill("Bestellnummer 4500012345 laut Rahmenvertrag 2026.");
@@ -227,17 +227,21 @@ test("Textbausteine: Kopftext für einen Kunden anlegen und im Rechnungseditor e
   await expect(insert).toHaveValue("");
 });
 
-// Die allgemeine Regel für Knopfzeilen (Knöpfe füllen die Zeile) steht vor der des Seitenkopfs und darf sie nicht schlagen: Im
-// Kopf scrollt die Zeile am Handy seitlich, die Knöpfe schrumpfen nicht und ihre Beschriftung bricht nicht um (DESIGN.md › Seitenkopf)
-test("Handy: Knöpfe im Seitenkopf schrumpfen nicht, die Zeile scrollt seitlich", async () => {
+// Kopf-Aktionen am Handy brechen um, statt seitlich aus dem Bild zu laufen (#1790); die Hauptaktion schließt rechts ab
+test("Handy: Knöpfe im Seitenkopf brechen um, ohne aus dem Bild zu ragen", async () => {
   const vorher = page.viewportSize();
   await page.setViewportSize(HANDY);
   try {
     await go("/bank");
-    const knoepfe = page.locator(".main > .page-head .actions > .btn");
-    await expect(knoepfe.first()).toBeVisible();
-    const schrumpfen = await knoepfe.evaluateAll((alle) => alle.map((k) => getComputedStyle(k).flexShrink));
-    expect(schrumpfen).toEqual(schrumpfen.map(() => "0"));
+    const aktionen = page.locator(".main > .page-head .actions");
+    await expect(aktionen).toBeVisible();
+    await expect(aktionen).toHaveCSS("flex-wrap", "wrap");
+    const ueberlauf = await aktionen.evaluate((el) => el.scrollWidth - el.clientWidth);
+    expect(ueberlauf).toBeLessThanOrEqual(1);
+    const verbinden = aktionen.getByRole("button", { name: "Konto verbinden" });
+    await expect(verbinden).toBeVisible();
+    const [zeileBox, knopfBox] = [await aktionen.boundingBox(), await verbinden.boundingBox()];
+    expect(Math.abs(knopfBox!.x + knopfBox!.width - (zeileBox!.x + zeileBox!.width))).toBeLessThanOrEqual(1);
   } finally {
     if (vorher) await page.setViewportSize(vorher);
   }
@@ -422,7 +426,7 @@ test("Textknöpfe: ein Klick zwischen die Knöpfe lässt Leiste und Markierung s
 
 test("Artikel und Textbausteine: die Liste zeigt die Auszeichnung statt der Zeichen", async () => {
   await go("/artikel");
-  await page.getByRole("button", { name: "Neuer Artikel" }).click();
+  await page.locator(".page-head").getByRole("button", { name: "Neuer Artikel" }).click();
   const artikel = page.getByRole("form", { name: "Neuer Artikel" });
   await artikel.getByLabel("Bezeichnung").fill("Wartung mit Auszeichnung");
   await artikel.getByLabel("Text zur Position (optional)").fill("Monatliche Wartung");
@@ -437,7 +441,7 @@ test("Artikel und Textbausteine: die Liste zeigt die Auszeichnung statt der Zeic
   await expect(zeile).not.toContainText("*Monatliche*");
 
   await go("/textbausteine");
-  await page.getByRole("button", { name: "Neuer Textbaustein" }).click();
+  await page.locator(".page-head").getByRole("button", { name: "Neuer Textbaustein" }).click();
   const baustein = page.getByRole("form", { name: "Neuer Textbaustein" });
   await baustein.getByLabel("Bezeichnung").fill("Baustein mit Auszeichnung");
   await baustein.getByRole("textbox", { name: "Text", exact: true }).fill("Bitte *sofort* zahlen");
@@ -465,7 +469,7 @@ test("Textknöpfe: auf dem Handy liegt die Leiste auch bei einem hochgescrollten
   });
   const handy = await context.newPage();
   await gehe(handy, "/textbausteine");
-  await handy.getByRole("button", { name: "Neuer Textbaustein" }).click();
+  await handy.locator(".page-head").getByRole("button", { name: "Neuer Textbaustein" }).click();
   const text = handy.getByRole("form", { name: "Neuer Textbaustein" }).getByLabel("Text", { exact: true });
   await text.fill(["eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "Wartung"].join("\n"));
   const zeileZuSehen = await text.evaluate((feld: HTMLTextAreaElement) => {
@@ -519,7 +523,7 @@ test("Textknöpfe: im gescrollten Artikel-Dialog schneidet der Rand die Leiste n
 test("Standard-Textbaustein: je für Rechnungen und Angebote vorbelegt und änderbar, für Mahnungen je Stufe, archiviert kein Standard mehr (#1494, #1678)", async () => {
   const standardBaustein = async (name: string, text: string, standardFuer: string) => {
     await go("/textbausteine");
-    await page.getByRole("button", { name: "Neuer Textbaustein" }).click();
+    await page.locator(".page-head").getByRole("button", { name: "Neuer Textbaustein" }).click();
     const formular = page.getByRole("form", { name: "Neuer Textbaustein" });
     await formular.getByLabel("Bezeichnung").fill(name);
     await formular.getByLabel("Art").selectOption("kopf");
@@ -583,7 +587,7 @@ test("Absenderzeile: in der Vorschau von Rechnung und Angebot ganz zu sehen, lan
 
 test("Bruttopreise: Artikel mit Endpreis, Umrechnung beim Einfügen, Vorschau mit „darin enthalten“", async () => {
   await go("/artikel");
-  await page.getByRole("button", { name: "Neuer Artikel" }).click();
+  await page.locator(".page-head").getByRole("button", { name: "Neuer Artikel" }).click();
   const form = page.getByRole("form", { name: "Neuer Artikel" });
   await form.getByLabel("Bezeichnung").fill("Fotoabzug 13 × 18 cm");
   await form.getByLabel("Einheit").selectOption("Stk.");

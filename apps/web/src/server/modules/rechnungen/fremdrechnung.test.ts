@@ -46,13 +46,12 @@ describe.skipIf(!testDatabaseUrl)("Fremde Ausgangsrechnung übernehmen (Postgres
               'DE123456789', 'BY', 'DE89370400440532013000', ${versteuerung}, ${kontenrahmen}, 14, '[]'::jsonb)`;
   }
 
-  async function customer(land = "DE", ustId = "") {
+  async function customer(land = "DE", ustId = "", address = { plz: "93047", ort: "Regensburg" }) {
     const { id } = await contacts.createContact(actor, {
       kundennummer: "",
       name: "Bäckerei Kranz",
       strasse: "Marktplatz 3",
-      plz: "93047",
-      ort: "Regensburg",
+      ...address,
       land,
       email: "",
       ustId,
@@ -151,6 +150,16 @@ describe.skipIf(!testDatabaseUrl)("Fremde Ausgangsrechnung übernehmen (Postgres
     await expect(
       foreign.adoptForeignInvoice(actor, input(eu, { taxTreatment: "reverse_charge", taxes: [{ rate: 0, net: 100_000, tax: 0 }] }), pdf, kleinunternehmerStand),
     ).rejects.toThrow(/USt-IdNr/);
+    // Schon ausgestellt, trotzdem wie beim Festschreiben: eine USt-IdNr. im falschen Aufbau sperrt (#1433, wie die Lieferung seit #1422)
+    const kurz = await customer("FR", "FR123456");
+    await expect(
+      foreign.adoptForeignInvoice(
+        actor,
+        input(kurz, { taxTreatment: "reverse_charge", taxes: [{ rate: 0, net: 100_000, tax: 0 }] }),
+        pdf,
+        kleinunternehmerStand,
+      ),
+    ).rejects.toThrow("FR123456: eine USt-IdNr. aus Frankreich hat nach FR");
     expect(await sql`select 1 from invoices`).toHaveLength(0);
   }, 30_000);
 
@@ -295,6 +304,25 @@ describe.skipIf(!testDatabaseUrl)("Fremde Ausgangsrechnung übernehmen (Postgres
     expect(result.items.map((i) => [i.occurredOn, i.decision])).toEqual([["2026-10-02", "excluded"]]);
     expect(result.included).toBe(0);
   }, 30_000);
+
+  it("übernimmt eine Drittlandleistung mit bestätigtem Leistungsort Helgoland und Inlandskunde", async () => {
+    await company("SKR03", "ist");
+    const contactId = await customer();
+    const place = { exemption: null, ancillary: null, foreignPlace: { country: "DE", postalCode: "27498", noForeignVat: true }, assetDisposal: false };
+    const draft = input(contactId, { taxTreatment: "drittland", taxes: [{ rate: 0, net: 12_345, tax: 0 }], taxDetails: place });
+    const { id } = await foreign.adoptForeignInvoice(actor, draft, pdf, kleinunternehmerStand);
+    const [row] = await sql`select tax_details from invoices where id = ${id}`;
+    expect(row!.tax_details).toEqual(place);
+  });
+
+  it("übernimmt eine Ausfuhr an eine Adresse im Sondergebiet Helgoland", async () => {
+    await company("SKR03", "ist");
+    const contactId = await customer("DE", "", { plz: "27498", ort: "Helgoland" });
+    const draft = input(contactId, { taxTreatment: "ausfuhr", taxes: [{ rate: 0, net: 12_345, tax: 0 }] });
+    const { id } = await foreign.adoptForeignInvoice(actor, draft, pdf, kleinunternehmerStand);
+    const [row] = await sql`select tax_treatment from invoices where id = ${id}`;
+    expect(row!.tax_treatment).toBe("ausfuhr");
+  });
 
   it("liest Nummer, Datum, Steuer und Kunde aus der E-Rechnung und schlägt ohne PDF fehl", async () => {
     await company("SKR03", "soll");

@@ -175,6 +175,25 @@ export async function weitereAngabenOeffnen(page: Page): Promise<void> {
   await expect(bereich).toHaveJSProperty("open", true);
 }
 
+/** Klappt „Fristen und Zeitraum ändern“ auf der Voranmeldung (Voranmeldungszeitraum, Dauerfristverlängerung) auf, wenn sie zu sind */
+export async function fristenOeffnen(page: Page): Promise<void> {
+  // Erst nach der Hydration klicken, sonst klappt React den Bereich danach wieder zu
+  await page.waitForLoadState("networkidle");
+  const bereich = page.locator('section[aria-labelledby="ust-fristen"] > details');
+  if (await bereich.evaluate((el) => (el as HTMLDetailsElement).open)) return;
+  await bereich.locator("summary").click();
+  await expect(bereich).toHaveJSProperty("open", true);
+}
+
+/** Über die Schnellsuche (Strg+K) zum Treffer, ohne Neuladen: der Wechsel zwischen zwei Einträgen derselben Art, ohne dass der Browser die Seite neu lädt */
+export async function ueberSchnellsuche(page: Page, suche: string, treffer: RegExp): Promise<void> {
+  await page.keyboard.press("Control+k");
+  const palette = page.getByRole("dialog", { name: "Befehlspalette" });
+  await palette.getByRole("combobox").fill(suche);
+  await palette.getByRole("option", { name: treffer }).click();
+  await expect(palette).toBeHidden();
+}
+
 /** Artikel aus der Trefferliste einer Position übernehmen */
 export async function artikelInPosition(page: Page, position: number, bezeichnung: string): Promise<void> {
   await page.getByLabel(`Beschreibung Position ${position}`).fill(bezeichnung);
@@ -206,7 +225,21 @@ export async function rechnungFestschreiben(page: Page, rechnung: Rechnung): Pro
   await expect(page.getByText(`${rechnung.gross} €`).first()).toBeVisible();
 }
 
-/** Die Rückfrage im ConfirmDialog mit dem Knopf der Aktion bestätigen */
+/** Bankseite: ein Punkt im Menü „Konto verbinden“ (#1951), etwa „Konto ohne Abruf anlegen“ oder „Bank hinzufügen“ */
+export async function kontoVerbinden(page: Page, punkt: string): Promise<void> {
+  await page.getByRole("button", { name: "Konto verbinden" }).click();
+  await page.getByRole("menu", { name: "Konto verbinden" }).getByRole("menuitem", { name: punkt }).click();
+}
+
+/** Bankseite: „Bank hinzufügen“ und im Dialog „Wie verbinden?“ einen Weg, etwa „FinTS (PIN/TAN)“ */
+export async function bankVerbinden(page: Page, weg: string): Promise<void> {
+  await kontoVerbinden(page, "Bank hinzufügen");
+  const dialog = page.getByRole("dialog", { name: "Wie verbinden?" });
+  await dialog.getByRole("radio", { name: weg }).check();
+  await dialog.getByRole("button", { name: "Weiter" }).click();
+  await expect(dialog).toHaveCount(0);
+}
+
 export async function bestaetigen(page: Page, aktion: string): Promise<void> {
   await page.getByRole("dialog").getByRole("button", { name: aktion, exact: true }).click();
 }
@@ -272,4 +305,39 @@ export async function kontrasteInThemes(page: Page, paths: string[]): Promise<vo
     localStorage.removeItem("haben-theme");
     localStorage.removeItem("haben-modus");
   });
+}
+
+/**
+ * Einrichtung eines Zahlungsdienstleisters bis zum Schritt „Konto“ (#2008): „Zahlungsdienstleister hinzufügen“, Anbieter
+ * wählen und, wo es mehrere Wege gibt, „Mit Exportdatei“. Gibt das Formular des Schritts zurück.
+ */
+export async function zahlungsdienstleisterKontoSchritt(page: Page, anbieter: string): Promise<Locator> {
+  await kontoVerbinden(page, "Zahlungsdienstleister hinzufügen");
+  const dialog = page.getByRole("dialog", { name: "Zahlungsdienstleister hinzufügen" });
+  await dialog.getByLabel(anbieter, { exact: true }).check();
+  await dialog.getByRole("button", { name: "Weiter" }).click();
+  const weg = page.getByRole("form", { name: "Weg" });
+  const konto = page.getByRole("form", { name: "Konto" });
+  await expect(weg.or(konto)).toBeVisible();
+  if (await weg.isVisible()) {
+    await weg.getByLabel("Mit Exportdatei").check();
+    await weg.getByRole("button", { name: "Weiter" }).click();
+  }
+  await expect(konto).toBeVisible();
+  return konto;
+}
+
+/**
+ * Konto eines Zahlungsdienstleisters ohne Datei anlegen (#2008), mit Marktplatz bei Amazon; endet auf der Bankseite mit
+ * dem neuen Konto
+ */
+export async function zahlungsdienstleisterKonto(page: Page, p: { anbieter: string; name: string; marktplatz?: string }): Promise<void> {
+  const konto = await zahlungsdienstleisterKontoSchritt(page, p.anbieter);
+  if (p.marktplatz) await konto.getByLabel("Marktplatz").selectOption(p.marktplatz);
+  await konto.getByLabel("Name", { exact: true }).fill(p.name);
+  await konto.getByRole("button", { name: "Weiter" }).click();
+  await page.getByRole("button", { name: "Nur Konto anlegen, Datei später" }).click();
+  await expect(page.getByText(`Konto „${p.name}“ angelegt.`)).toBeVisible();
+  await page.getByRole("link", { name: "Zum Konto" }).click();
+  await page.waitForURL(/\/bank\?konto=/);
 }

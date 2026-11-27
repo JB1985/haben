@@ -2,7 +2,19 @@ import { expect, type Locator, test, type Page } from "@playwright/test";
 import postgres from "postgres";
 import { currentDay, day, USER } from "./daten.ts";
 import { databaseUrlFuer } from "./durchlaeufe.ts";
-import { bestaetigen, fragenUeberspringen, dkb, durchlaufSeite, faktenZeigen, gehe, kontaktAnlegen, rechnungFestschreiben, SETUP_CODE } from "./einrichtung.ts";
+import {
+  bestaetigen,
+  fragenUeberspringen,
+  dkb,
+  durchlaufSeite,
+  faktenZeigen,
+  gehe,
+  kontaktAnlegen,
+  rechnungFestschreiben,
+  SETUP_CODE,
+  zahlungsdienstleisterKonto,
+  zahlungsdienstleisterKontoSchritt,
+} from "./einrichtung.ts";
 
 /**
  * Rückfragen vor Aktionen, die früher mit einem Klick auslösten (#404), in eigener, leerer Datenbank (Projekt
@@ -296,47 +308,36 @@ test("Bankabgleich: ein fremdes Konto ausschließen fragt nach, blendet es aus u
     .setInputFiles([datei("zweitfirma.csv", [["Kunde der Zweitfirma", "Rechnung 2026-17", "250,00"]])]);
   await expect(page.getByText(/zweitfirma.csv: 1 neue/)).toBeVisible({ timeout: 30_000 });
 
-  // Die Reiter der Konten ohne „Alle Konten“, den es ab zwei Konten gibt (#617)
-  const konten = page.getByRole("navigation", { name: "Konten" }).getByRole("link").filter({ hasNotText: "Alle Konten" });
+  // Ausgeschlossen wird an der Zeile des Kontos auf der Seite Verbindungen (#1951)
+  await go("/bank/verbindungen");
+  const konten = page.getByRole("region", { name: "Banken", exact: true }).locator("tbody tr");
   await expect(konten).toHaveCount(2);
-  const waehle = async (iban: string) => {
-    for (let i = 0; i < (await konten.count()); i++) {
-      await konten.nth(i).click();
-      // Die Anschrift des Kontos erscheint erst, wenn die Seite die Daten des gewählten Kontos hat
-      const da = await page
-        .getByText(iban)
-        .first()
-        .waitFor({ timeout: 3_000 })
-        .then(
-          () => true,
-          () => false,
-        );
-      if (da) return;
-    }
-    throw new Error(`Konto ${iban} nicht gefunden`);
+  const ausschliessen = async (iban: string) => {
+    const kurz = `${iban.slice(0, 4)} …${iban.replace(/\s/g, "").slice(-4)}`;
+    const zeile = konten.filter({ hasText: kurz });
+    await zeile.getByRole("button", { name: /^Weitere Aktionen für / }).click();
+    await page.getByRole("menuitem", { name: "Gehört nicht zu dieser Firma …" }).click();
   };
 
-  // Das Konto mit zugeordneten Umsätzen gehört zur Firma: der Knopf ist gesperrt und nennt den Grund
-  await waehle(EIGEN);
-  await expect(page.getByRole("button", { name: "Gehört nicht zu dieser Firma" })).toBeDisabled();
+  // Das Konto mit zugeordneten Umsätzen gehört zur Firma: statt der Rückfrage steht der Grund da
+  await ausschliessen(EIGEN);
   await expect(page.getByText(/ist schon zugeordnet|ist schon verrechnet/).first()).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 
   // Das fremde Konto: abbrechen ändert nichts, bestätigen blendet es aus
-  await waehle(FREMD);
-  const knopf = page.getByRole("button", { name: "Gehört nicht zu dieser Firma" });
-  await expect(knopf).toBeEnabled();
-  await knopf.click();
+  await ausschliessen(FREMD);
   await expect(page.getByRole("dialog", { name: /^Konto „.+“ ausschließen\?$/ })).toContainText("Gelöscht wird nichts");
   await page.getByRole("dialog").getByRole("button", { name: "Abbrechen", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(konten).toHaveCount(2);
 
-  await knopf.click();
+  await ausschliessen(FREMD);
   await bestaetigen(page, "Konto ausschließen");
   await expect(konten).toHaveCount(1);
   const liste = page.getByRole("region", { name: "Ausgeschlossene Konten" });
   await expect(liste).toContainText(FREMD);
   await expect(liste).toContainText("1 Umsatz");
+  await go("/bank?filter=alle");
   await expect(page.getByText("Rechnung 2026-17")).toHaveCount(0);
 
   // Ein Import in das ausgeschlossene Konto wird abgelehnt
@@ -344,14 +345,14 @@ test("Bankabgleich: ein fremdes Konto ausschließen fragt nach, blendet es aus u
     .locator('input[type=file][aria-label="Kontoauszugsdateien"]')
     .setInputFiles([datei("zweitfirma-2.csv", [["Kunde der Zweitfirma", "Rechnung 2026-18", "80,00"]])]);
   await expect(page.getByText(/ausgeschlossen/).first()).toBeVisible({ timeout: 30_000 });
-  await expect(konten).toHaveCount(1);
 
   // Wieder aufnehmen: das Konto und sein Umsatz sind da
+  await go("/bank/verbindungen");
+  await expect(konten).toHaveCount(1);
   await liste.getByRole("button", { name: /wieder aufnehmen/ }).click();
   await expect(konten).toHaveCount(2);
   await expect(page.getByRole("region", { name: "Ausgeschlossene Konten" })).toHaveCount(0);
-  await waehle(FREMD);
-  await page.getByRole("link", { name: "Alle", exact: true }).click();
+  await go("/bank?konto=alle&filter=alle");
   await expect(page.getByText("Rechnung 2026-17").first()).toBeVisible();
 });
 
@@ -681,16 +682,158 @@ test("Umzug: Die Frage eines inzwischen beendeten Abrufs kommt beim nächsten Ab
   await expect(rueckfrage("Abruf abbrechen?")).toHaveCount(0, { timeout: 10_000 });
 
   // Später ein neuer Abruf. Der Start-Aufruf bräuchte einen echten Schlüssel; hier legt er nur den Lauf an wie der Server
-  await page.route(
-    (url) => url.pathname.includes("_serverFn"),
-    async (route) => {
-      if (route.request().method() !== "POST") return route.fallback();
-      await sql`insert into lexoffice_imports (source, status, progress) values ('lexoffice', 'laeuft', ${fortschritt}::jsonb)`;
-      return route.continue({ url: antwort.url(), method: "GET" });
-    },
-  );
+  const serverFn = (url: URL) => url.pathname.includes("_serverFn");
+  await page.route(serverFn, async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    await sql`insert into lexoffice_imports (source, status, progress) values ('lexoffice', 'laeuft', ${fortschritt}::jsonb)`;
+    return route.continue({ url: antwort.url(), method: "GET" });
+  });
   await page.getByRole("button", { name: "Erneut abrufen" }).click();
   await expect(page.getByText("Läuft: Belege und Dateien")).toBeVisible({ timeout: 10_000 });
 
   await expect(rueckfrage("Abruf abbrechen?")).toHaveCount(0);
+  // Die Route nur für diesen Test aufheben: sonst fängt sie die Server-Aufrufe der nachfolgenden Tests ab
+  await page.unroute(serverFn);
+});
+
+test("Bank: ein zweites Konto für denselben Marktplatz fragt vorher nach (#1779)", async () => {
+  await go("/bank");
+  const konten = page.getByRole("navigation", { name: "Konten" }).getByRole("link");
+  const zweites = konten.filter({ hasText: "Amazon DE 2" });
+
+  await zahlungsdienstleisterKonto(page, { anbieter: "Amazon", name: "Amazon DE", marktplatz: "Amazon.de" });
+
+  // Zweites Konto für denselben Marktplatz: erst fragen; Abbrechen legt nichts an
+  const konto = await zahlungsdienstleisterKontoSchritt(page, "Amazon");
+  await konto.getByLabel("Konto in Haben").selectOption("");
+  await konto.getByLabel("Marktplatz").selectOption("Amazon.de");
+  await konto.getByLabel("Name", { exact: true }).fill("Amazon DE 2");
+  await konto.getByRole("button", { name: "Weiter" }).click();
+  const titel = "Noch ein Konto für Amazon.de anlegen?";
+  await expect(rueckfrage(titel)).toContainText("gibt es schon ein Konto");
+  await abbrechen(titel);
+  await expect(konto).toBeVisible();
+
+  // Erneut abschicken, jetzt bestätigen: das zweite Konto entsteht mit dem nächsten Schritt
+  await konto.getByRole("button", { name: "Weiter" }).click();
+  await expect(rueckfrage(titel)).toBeVisible();
+  await bestaetigen(page, "Konto trotzdem anlegen");
+  await page.getByRole("button", { name: "Nur Konto anlegen, Datei später" }).click();
+  await page.getByRole("link", { name: "Zum Konto" }).click();
+  await expect(zweites).toHaveCount(1);
+});
+
+test("Bank: Konten als Kartenleiste in Gruppen, im schmalen Fenster als Chips unter dem Kopf (#1951)", async () => {
+  await go("/bank?konto=alle");
+  const leiste = page.getByRole("navigation", { name: "Konten" });
+  const alle = leiste.getByRole("group", { name: "Gesamt" }).getByRole("link", { name: /Alle Konten/ });
+  await expect(alle).toHaveAttribute("aria-current", "page");
+  await expect(alle).toContainText("4 Konten");
+  // Kein Konto braucht etwas: leise „Alles aktuell“ statt eines Status
+  await expect(alle).toContainText("Alles aktuell");
+  const banken = leiste.getByRole("group", { name: "Banken" }).getByRole("link");
+  await expect(banken).toHaveCount(2);
+  // Normalfall leise: Weg und Zeit des letzten Imports, ohne Status
+  await expect(banken.first()).toContainText(/Datei · heute \d\d:\d\d/);
+  const dienstleister = leiste.getByRole("group", { name: "Zahlungsdienstleister" }).getByRole("link");
+  await expect(dienstleister).toHaveCount(2);
+  const amazon2 = dienstleister.filter({ hasText: "Amazon DE 2" });
+  await expect(amazon2).toContainText("Noch kein Import");
+  // Alle Karten passen: keine Pfeile
+  const nachLinks = page.getByRole("button", { name: "Konten nach links" });
+  const nachRechts = page.getByRole("button", { name: "Konten nach rechts" });
+  await expect(nachLinks).toBeHidden();
+  await expect(nachRechts).toBeHidden();
+  // Ohne Pfeile steht die erste Karte bündig mit dem Titel der Seite, nicht um die Breite eines Pfeils eingerückt
+  const [titel, ersteKarte] = await Promise.all([page.locator(".page-head h1").boundingBox(), alle.boundingBox()]);
+  expect(Math.abs((ersteKarte?.x ?? 0) - (titel?.x ?? 0))).toBeLessThanOrEqual(1);
+
+  const groesse = page.viewportSize()!;
+  try {
+    // Schmaler, aber noch über 1100 px: die Leiste rollt, die Pfeile erscheinen
+    await page.setViewportSize({ width: 1120, height: 800 });
+    await expect(nachRechts).toBeEnabled();
+    await expect(nachLinks).toBeDisabled();
+    await nachRechts.click();
+    await expect(nachLinks).toBeEnabled();
+
+    // Eine Karte ist ein Link: sie wählt das Konto, „Alle Konten“ ist dann nicht mehr gewählt. Auch solange die Daten des
+    // neuen Kontos noch laden, ist genau eine Karte gewählt (die Adresse ist schon weiter, die Daten noch nicht)
+    await page.route("**/_serverFn/**", async (route) => {
+      await new Promise((r) => setTimeout(r, 1_500));
+      await route.continue();
+    });
+    await amazon2.click();
+    await page.waitForURL((u) => u.searchParams.get("konto") !== "alle");
+    expect(await leiste.locator('[aria-current="page"]').count()).toBe(1);
+    // Erst weiter, wenn die zurückgehaltenen Anfragen durch sind; sonst liefe ihr continue() in den nächsten Test
+    await page.unrouteAll({ behavior: "wait" });
+    await expect(amazon2).toHaveAttribute("aria-current", "page");
+    await expect(alle).not.toHaveAttribute("aria-current", "page");
+
+    // Unter 1100 px: Chips mit Name und Zahl offener Umsätze statt Karten, stehen beim Rollen unter dem Kopf
+    await page.setViewportSize({ width: 900, height: 500 });
+    const chips = page.getByRole("navigation", { name: "Konten" });
+    await expect(chips.getByRole("group")).toHaveCount(0);
+    await expect(chips.getByRole("link")).toHaveCount(5);
+    await expect(chips.getByRole("link", { name: /Amazon DE 2/ })).toHaveAttribute("aria-current", "page");
+    // Ohne offene Umsätze steht keine 0 am Chip
+    await expect(chips.getByRole("link", { name: "Amazon DE 2", exact: true })).toHaveCount(1);
+    const alleChip = chips.getByRole("link", { name: /^Alle/ });
+    await alleChip.click();
+    await expect(alleChip).toHaveAttribute("aria-current", "page");
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    const kopf = page.locator(".page-head");
+    await expect
+      .poll(async () => {
+        const [k, c] = await Promise.all([kopf.boundingBox(), chips.boundingBox()]);
+        return k && c ? Math.round(c.y - (k.y + k.height)) : null;
+      })
+      .toBe(0);
+  } finally {
+    await page.setViewportSize(groesse);
+  }
+});
+
+test("Bank: Beim Laden mit einem Konto, dessen Karte ganz zu sehen ist, rollt die Leiste sie nicht aus dem Blick (Review #1951)", async () => {
+  // Viele Konten, damit die Leiste weit rollen kann; ihre Namen sortieren hinter die bisherigen
+  await sql.begin(async (tx) => {
+    await tx`select set_config('haben.actor', 'e2e', true)`;
+    for (let i = 1; i <= 14; i++) {
+      const nummer = String(i).padStart(2, "0");
+      await tx`insert into bank_accounts (name, iban) values (${`Zusatzkonto ${nummer}`}, ${`DE990000000000000000${nummer}`})`;
+    }
+  });
+  await go("/bank?konto=alle");
+  const leiste = page.getByRole("navigation", { name: "Konten" });
+  // Die letzte Karte, die ohne Rollen ganz in der Leiste steht
+  const href = await leiste.evaluate((nav) => {
+    const rahmen = nav.getBoundingClientRect();
+    const ganz = [...nav.querySelectorAll("a")].filter((a) => {
+      const r = a.getBoundingClientRect();
+      return r.left >= rahmen.left && r.right <= rahmen.right;
+    });
+    return ganz.at(-1)?.getAttribute("href") ?? null;
+  });
+  expect(href).not.toBeNull();
+  await go(href!);
+  const gewaehlt = leiste.locator("[aria-current='page']");
+  await expect(gewaehlt).toHaveAttribute("href", href!);
+  await expect(gewaehlt).toBeInViewport({ ratio: 1 });
+});
+
+test("Navigation: auf den Verbindungen ist nur „Verbindungen“ markiert, nicht auch „Bank“", async () => {
+  const nav = page.getByRole("navigation", { name: "Hauptnavigation" });
+  const bank = nav.getByRole("link", { name: "Bank", exact: true });
+  const verbindungen = nav.getByRole("link", { name: "Verbindungen", exact: true });
+  await go("/bank?konto=alle");
+  await expect(bank).toHaveAttribute("aria-current", "page");
+  await expect(verbindungen).not.toHaveAttribute("aria-current", "page");
+  await go("/bank/verbindungen");
+  await expect(verbindungen).toHaveAttribute("aria-current", "page");
+  await expect(bank).not.toHaveAttribute("aria-current", "page");
+  // Die geführte Einrichtung gehört zu den Verbindungen
+  await go("/bank/verbinden/stripe");
+  await expect(verbindungen).toHaveAttribute("aria-current", "page");
+  await expect(bank).not.toHaveAttribute("aria-current", "page");
 });

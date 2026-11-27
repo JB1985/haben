@@ -104,6 +104,60 @@ test("Einstellungen › Bereiche schaltet sofort wieder ein", async () => {
   await expect(karte.getByRole("checkbox", { name: /Personal/ })).toBeChecked();
 });
 
+test("Die fünf neuen Bereiche sind sichtbar und lassen sich ein- und ausblenden", async () => {
+  await gehe(page, "/einstellungen?bereich=bereiche");
+  const karte = page.getByRole("region", { name: "Bereiche im Menü" });
+  const seiten = [
+    ["Artikel", "/artikel"],
+    ["Zeiteinträge", "/leistungen"],
+    ["Textbausteine", "/textbausteine"],
+  ] as const;
+  const bereiche = ["Rechnungen schreiben", "Mahnwesen", ...seiten.map(([name]) => name)];
+  for (const name of bereiche) {
+    const schalter = karte.getByRole("checkbox", { name, exact: true });
+    await expect(schalter).toBeChecked();
+    await schalter.uncheck();
+    await expect(page.getByText(`${name} ist ausgeblendet.`)).toBeVisible();
+  }
+
+  await page.keyboard.press("Control+k");
+  const palette = page.getByRole("dialog", { name: "Befehlspalette" });
+  await expect(palette).toBeVisible();
+  for (const [name] of seiten) {
+    await expect(menue().getByRole("link", { name, exact: true })).toHaveCount(0);
+    await palette.getByRole("combobox").fill(name);
+    await expect(palette.getByRole("option", { name: new RegExp(name) })).toHaveCount(0);
+  }
+  await page.keyboard.press("Escape");
+  for (const [name, pfad] of seiten) {
+    await gehe(page, pfad);
+    await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
+  }
+  await gehe(page, "/leistungen");
+  await expect(page.getByRole("button", { name: "Abrechnen", exact: true })).toHaveCount(0);
+
+  await gehe(page, "/rechnungen");
+  const reiter = page.getByRole("navigation", { name: "Bereiche der Rechnungen" });
+  await expect(reiter.getByRole("link", { name: "Wiederkehrend" })).toBeVisible();
+  await expect(reiter.getByRole("link", { name: "Mahnwesen" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Neue Rechnung" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Ausgangsrechnung hochladen" })).toBeVisible();
+
+  await gehe(page, "/rechnungen/mahnwesen");
+  await expect(page.getByRole("heading", { name: "Mahnwesen", level: 1 })).toBeVisible();
+
+  await gehe(page, "/einstellungen?bereich=bereiche");
+  for (const name of bereiche) {
+    const schalter = karte.getByRole("checkbox", { name, exact: true });
+    await expect(schalter).not.toBeChecked();
+    await schalter.check();
+    await expect(schalter).toBeEnabled();
+  }
+  await gehe(page, "/rechnungen");
+  await expect(page.getByRole("link", { name: "Neue Rechnung" })).toHaveCount(2);
+  await expect(reiter.getByRole("link", { name: "Mahnwesen" })).toBeVisible();
+});
+
 test("Fragen erneut durchgehen: vorausgefüllt, geänderte Rechtsform erst nach Rückfrage", async () => {
   await gehe(page, "/einstellungen?bereich=bereiche");
   await page.getByRole("link", { name: "Fragen erneut durchgehen" }).click();
@@ -176,6 +230,47 @@ test("Leere Belegliste: Satz mit Beispiel, Weg zum Postfach, kein Filter und kei
   await knopf.click();
   await expect(page).toHaveURL(/\/einstellungen\?bereich=email/);
 });
+
+// DESIGN.md, Seitenkopf: Leert ein Filter die Liste, steht kein Knopf zum Anlegen im Leerzustand. Mit „Archivierte zeigen“
+// (archiv=true) zählen auch die archivierten Kontakte mit, die Liste ist also nur ohne jeden Kontakt leer.
+test("Leere Kontaktliste: Satz und Knopf zum Anlegen, mit Archivfilter nur der Satz (#1253)", async () => {
+  await gehe(page, "/kontakte");
+  const liste = page.getByRole("region", { name: "Kontaktliste" });
+  await expect(liste.getByText("Hier stehen deine Kunden und Lieferanten.")).toBeVisible();
+  await expect(liste.getByRole("link", { name: "Neuer Kontakt" })).toBeVisible();
+  await gehe(page, "/kontakte?archiv=true");
+  await expect(liste.getByText("Keine Kontakte, auch keine archivierten.")).toBeVisible();
+  await expect(liste.getByText("Hier stehen deine Kunden und Lieferanten.")).toHaveCount(0);
+  await expect(liste.getByRole("link", { name: "Neuer Kontakt" })).toHaveCount(0);
+});
+
+// DESIGN.md, Seitenkopf: Hat der Kopf einen Knopf zum Anlegen, steht derselbe Knopf im Leerzustand noch einmal, mit einem Filter nicht.
+// Bank kennt die Ausnahme, Pauschalen und Kasse haben keinen Knopf im Kopf.
+const LEERZUSTAND = [
+  { pfad: "/angebote", rolle: "link", name: "Neues Angebot" },
+  { pfad: "/rechnungen", rolle: "link", name: "Neue Rechnung" },
+  { pfad: "/rechnungen/wiederkehrend", rolle: "link", name: "Neue Vorlage" },
+  { pfad: "/dauerbelege", rolle: "link", name: "Neuer Dauerbeleg" },
+  { pfad: "/buchungen", rolle: "link", name: "Buchung erfassen" },
+  { pfad: "/anlagen", rolle: "link", name: "Anlage übernehmen" },
+  { pfad: "/artikel", rolle: "button", name: "Neuer Artikel", filter: "Archiviert" },
+  { pfad: "/textbausteine", rolle: "button", name: "Neuer Textbaustein", filter: "Archiviert" },
+  { pfad: "/leistungen", rolle: "button", name: "Neuer Eintrag", filter: "?von=2020-01-01" },
+] as const;
+
+for (const { pfad, rolle, name, ...rest } of LEERZUSTAND) {
+  test(`Leere Liste ${pfad}: „${name}“ im Seitenkopf und noch einmal im Leerzustand, mit Filter nur im Kopf (#1253)`, async () => {
+    const filter = "filter" in rest ? rest.filter : undefined;
+    const knopf = page.getByRole(rolle, { name, exact: true });
+    await gehe(page, pfad);
+    await expect(page.locator(".page-head").getByRole(rolle, { name, exact: true })).toHaveCount(1);
+    await expect(knopf).toHaveCount(2);
+    if (!filter) return;
+    if (filter.startsWith("?")) await gehe(page, pfad + filter);
+    else await page.getByRole("button", { name: new RegExp(`^${filter}`) }).click();
+    await expect(knopf).toHaveCount(1);
+  });
+}
 
 test("Am Handy ohne waagrechtes Scrollen, hell und dunkel", async () => {
   await page.setViewportSize({ width: 390, height: 844 });

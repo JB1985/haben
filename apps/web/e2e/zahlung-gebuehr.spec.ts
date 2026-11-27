@@ -1,6 +1,16 @@
 import { expect, type Page, test } from "@playwright/test";
 import { day } from "./daten.ts";
-import { axeVerstoesse, CUSTOMERS, durchlaufSeite, einrichten, gehe, INVOICES, kontaktAnlegen, rechnungFestschreiben } from "./einrichtung.ts";
+import {
+  axeVerstoesse,
+  CUSTOMERS,
+  durchlaufSeite,
+  einrichten,
+  gehe,
+  INVOICES,
+  kontaktAnlegen,
+  rechnungFestschreiben,
+  zahlungsdienstleisterKonto,
+} from "./einrichtung.ts";
 
 /**
  * Eigener Durchlauf zu #1417: Zahlung und Gebühr eines Zahlungsdienstleisters stehen in der Bankliste in einer Zeile und
@@ -11,6 +21,7 @@ test.describe.configure({ mode: "serial" });
 
 let page: Page;
 let pageErrors: string[] = [];
+let rechnungPfad = "";
 
 test.beforeAll(async ({ browser }) => {
   ({ page, pageErrors } = await durchlaufSeite(browser));
@@ -29,15 +40,10 @@ test("Einrichtung mit einer festgeschriebenen Rechnung und einem Stripe-Konto mi
   await einrichten(page);
   await kontaktAnlegen(page, CUSTOMERS[2]!);
   await rechnungFestschreiben(page, RECHNUNG);
+  rechnungPfad = new URL(page.url()).pathname;
 
   await gehe(page, "/bank");
-  await page.getByRole("button", { name: "Konto hinzufügen" }).click();
-  const neuesKonto = page.locator("form", { has: page.getByRole("button", { name: "Konto anlegen" }) });
-  await neuesKonto.getByLabel("Art", { exact: true }).selectOption("provider");
-  await neuesKonto.getByLabel("Dienstleister", { exact: true }).selectOption("stripe");
-  await neuesKonto.getByLabel("Name", { exact: true }).fill("Stripe");
-  await neuesKonto.getByRole("button", { name: "Konto anlegen" }).click();
-  await expect(page.getByText("Konto angelegt.")).toBeVisible();
+  await zahlungsdienstleisterKonto(page, { anbieter: "Stripe", name: "Stripe" });
 
   const csv = [
     "balance_transaction_id,created_utc,available_on_utc,currency,gross,fee,net,reporting_category,description,customer_name",
@@ -47,6 +53,12 @@ test("Einrichtung mit einer festgeschriebenen Rechnung und einem Stripe-Konto mi
   await page
     .locator('input[type=file][aria-label="Kontoauszugsdateien"]')
     .setInputFiles([{ name: "stripe.csv", mimeType: "text/csv", buffer: Buffer.from(csv) }]);
+  // Der Export nennt kein Konto: die Meldung fragt danach, vorgewählt ist das eben angelegte (#1951)
+  const nachfrage = page.getByRole("form", { name: "Konto für stripe.csv" });
+  await expect(page.getByText("stripe.csv: Export eines Zahlungsdienstleisters. Wähle das Konto des Dienstleisters.")).toBeVisible({ timeout: 30_000 });
+  await expect(nachfrage.getByLabel("Konto")).toHaveValue(/.+/);
+  await expect(nachfrage.getByLabel("Konto").locator("option:checked")).toHaveText("Stripe");
+  await nachfrage.getByRole("button", { name: "Importieren" }).click();
   await expect(page.getByText(/4 neue Umsätze für Stripe/)).toBeVisible({ timeout: 30_000 });
 });
 
@@ -107,5 +119,20 @@ test("Zuordnen und Gebühr buchen: beide Umsätze sind erledigt, danach stehen s
   await gehe(page, "/bank?filter=offen");
   await expect(zeilen().filter({ hasText: "Gebühr · txn_e2e_a" })).toContainText("Beleg fehlt");
   await expect(zeilen().filter({ hasText: "Rheinpixel GmbH" })).toHaveCount(0);
+  expect(pageErrors).toEqual([]);
+});
+
+test("Von der Rechnung über „Bank“ unter Zahlungen zum Umsatz, dort steht die Buchung (#1855)", async () => {
+  await gehe(page, rechnungPfad);
+  const zahlungen = page.locator("section[aria-labelledby=payments-heading]");
+  await zahlungen.getByRole("link", { name: "Bank", exact: true }).click();
+  await page.waitForURL(/\/bank\?.*umsatz=/);
+  await page.waitForLoadState("networkidle");
+  await expect(panel()).toContainText("Rheinpixel GmbH");
+  await expect(
+    panel()
+      .getByRole("link", { name: /^Buchung vom / })
+      .first(),
+  ).toBeVisible();
   expect(pageErrors).toEqual([]);
 });

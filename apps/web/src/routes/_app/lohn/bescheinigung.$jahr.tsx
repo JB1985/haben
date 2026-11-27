@@ -3,6 +3,7 @@ import { Link, createFileRoute, notFound, useNavigate, useRouter } from "@tansta
 import { useServerFn } from "@tanstack/react-start";
 import { useId, useState, type FormEvent } from "react";
 import { ElsterSubmit } from "../../../components/ElsterSubmit.tsx";
+import { EricHinweis } from "../../../components/EricHinweis.tsx";
 import { Icon } from "../../../components/Icon.tsx";
 import { NoticeBanner } from "../../../components/NoticeBanner.tsx";
 import { ELSTER_KIND_LABEL, elsterNotice, type ElsterKind } from "../../../lib/elster.ts";
@@ -10,6 +11,7 @@ import { formatDate, formatLongDate } from "../../../lib/format.ts";
 import { useAction } from "../../../lib/use-action.ts";
 import { getLstb, stornoLstbFn, submitLstbFn, vermerkeLstbFn } from "../../../server/functions/lstb.ts";
 import { Field } from "../../../components/Field.tsx";
+import { useFokusUeberWechsel } from "../../../lib/use-fokus-ueber-wechsel.ts";
 
 /*
  * Personal › Lohnsteuerbescheinigung (§ 41b EStG): je Mitarbeiter und Jahr die Werte aus den festgeschriebenen
@@ -47,6 +49,8 @@ const zahl = (tausendstel: number) => (tausendstel / 1000).toLocaleString("de-DE
 function LstbPage() {
   const data = Route.useLoaderData();
   const navigate = useNavigate();
+  // Die Auswahl behält beim Wechsel den Fokus, obwohl die Seite neu entsteht
+  const auswahl = useFokusUeberWechsel<HTMLSelectElement>("lstb-jahr");
   const dieses = Number(data.heute.slice(0, 4));
   const jahre = [...new Set([data.year, dieses, dieses - 1])].sort((a, b) => b - a);
   return (
@@ -58,7 +62,15 @@ function LstbPage() {
         </div>
         <Field label="Jahr">
           {(control) => (
-            <select {...control} value={data.year} onChange={(e) => navigate({ to: "/lohn/bescheinigung/$jahr", params: { jahr: e.target.value } })}>
+            <select
+              {...control}
+              ref={auswahl.ref}
+              value={data.year}
+              onChange={(e) => {
+                auswahl.merken();
+                void navigate({ to: "/lohn/bescheinigung/$jahr", params: { jahr: e.target.value } });
+              }}
+            >
               {jahre.map((j) => (
                 <option key={j} value={j}>
                   {j}
@@ -69,6 +81,7 @@ function LstbPage() {
         </Field>
       </div>
       <div className="stack" style={{ gap: 24 }}>
+        {data.mode === "simuliert" && !data.ohneSchnittstelle && <EricHinweis />}
         <p className="muted small" style={{ margin: 0, maxWidth: 760 }}>
           Nach dem Abschluss des Lohnkontos, am Jahresende oder mit dem Austritt, übermittelt der Arbeitgeber je Arbeitnehmer die elektronische
           Lohnsteuerbescheinigung, für {data.year} bis zum {formatLongDate(data.frist)} (§ 41b EStG, § 93c AO), und gibt ihm einen Ausdruck. Haben nimmt die

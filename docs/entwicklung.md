@@ -315,7 +315,7 @@ Nicht geprüft werden die Seiten von esteuer.de (unvollständige Zertifikatskett
 - **Lint mit Biome:** Abgeschaltete Regeln stehen mit Grund in `biome.jsonc`. Eine Ausnahme an einer Stelle steht direkt davor als `// biome-ignore lint/<gruppe>/<regel>: <Grund>`.
 - **Imports mit `.ts`-Endung** (`allowImportingTsExtensions`). Der ERiC-Worker und das Migrationsskript laufen unter Bun direkt aus den Quellen, ohne Build.
 - **Technik nach `tech-stack.md`** in [firsttris/workflows](https://github.com/firsttris/workflows). Abweichungen hier: schlichtes CSS mit Variablen in `apps/web/src/styles.css` statt Tailwind, eine eigene `Icon`-Komponente statt lucide, Typst für das PDF der Rechnung.
-- **Wenige Abhängigkeiten:** Jedes Paket ist Angriffsfläche und ein Update, das gepflegt werden muss. Eine neue Abhängigkeit zur Laufzeit kommt nur dazu, wenn wenige Zeilen eigener Code oder ein vorhandenes Paket nicht reichen; der Pull Request nennt den Grund.
+- **Wenige Abhängigkeiten:** Jedes Paket ist Angriffsfläche und ein Update, das gepflegt werden muss. Eine neue Abhängigkeit kommt nur dazu, wenn wenige Zeilen eigener Code oder ein vorhandenes Paket nicht reichen. Der Pull Request nennt je Paket unter `## Neue Abhängigkeiten`, wofür es nötig ist, warum eigener Code nicht reicht, die Lizenz und wie viele Pakete es mitbringt ([Automatische Prüfungen der Regeln](mitwirken.md#automatische-prüfungen-der-regeln)).
 - **Funktional statt objektorientiert:** reine Funktionen, die Daten nehmen und Daten zurückgeben, Seiteneffekte am Rand; Abhängigkeiten werden übergeben. Funktionskomponenten und Hooks, keine Klassen (außer den Unterklassen von `UserError`), Fehler als Werte, wo der Code das schon so macht. Klare Namen, keine Doppelungen und kein toter Code, Kommentare sagen warum.
 - **Eine Datei tut eine Sache:** ab etwa 400 Zeilen teilen, eine Funktion über 80 Zeilen ohne Leerzeilen (Tests ausgenommen). Ältere größere Dateien stehen in `.checks/large-files.txt`; Neues kommt möglichst in eine eigene Datei; wer eine davon berührt, teilt sie gleich mit, wo es ohne großen Umbau geht (Pfadfinder-Regel in [Mitwirken](mitwirken.md), [Automatische Prüfungen der Regeln](mitwirken.md#automatische-prüfungen-der-regeln)). Ein Refactor ändert kein Verhalten.
 - **Bun statt Node:** Die Skripte starten Vite, Vitest, Playwright, Biome, tsc und drizzle-kit mit `bun --bun`; ohne den Schalter nähme Bun das `node` aus deren Startzeile, falls eines installiert ist. Install-Skripte führt `bun install` nur für die Pakete in `trustedDependencies` aus (esbuild lädt sein Binary, koffi sein natives Modul für ERiC). `bunfig.toml` legt die Abhängigkeiten wie früher pnpm isoliert ab: Jedes Paket sieht nur, was es selbst einträgt.
@@ -347,7 +347,7 @@ Nicht geprüft werden die Seiten von esteuer.de (unvollständige Zertifikatskett
 | `apps/web/drizzle` | SQL-Migrationen |
 | `packages/core` | Beträge, Zeiträume, Steuernummer, UStVA, Buchungssätze, EÜR, Zuordnungsvorschläge |
 | `packages/elster` | ERiC-Anbindung, XML für Voranmeldung und Jahreserklärungen, Worker |
-| `packages/import` | Kontoauszugs-Parser, Exporte von Zahlungsdienstleistern, Deduplizierung, DATEV, Lexoffice- und sevDesk-Client, BuchhaltungsButler-Exporte (`buchhaltungsbutler/`), Accountable-Export (`accountable/`), WISO-Buchungs-CSV (`wiso/`), Finanzberichte von Google Play und App Store Connect (`stores/`), Kontoabruf über Enable Banking und FinTS (`fints/`), CSV-Import von Kontakten, Artikeln und Anlagen (`csv-import/`), Spaltenzuordnung für Kontoauszüge unbekannter Banken (`bank-zuordnung/`) |
+| `packages/import` | Kontoauszugs-Parser, Exporte von Zahlungsdienstleistern, Deduplizierung, DATEV, Lexoffice- und sevDesk-Client, BuchhaltungsButler-Exporte (`buchhaltungsbutler/`), Accountable-Export (`accountable/`), WISO-Buchungs-CSV und Listen aus WISO-PDFs, Anlagenverzeichnis und Kontaktliste (`wiso/`), Finanzberichte von Google Play und App Store Connect (`stores/`), Kontoabruf über Enable Banking und FinTS (`fints/`), CSV-Import von Kontakten, Artikeln und Anlagen (`csv-import/`), Spaltenzuordnung für Kontoauszüge unbekannter Banken (`bank-zuordnung/`) |
 | `packages/einvoice` | Rechnungs-PDF mit Typst, E-Rechnung erzeugen und lesen |
 | `apps/elster-helfer` | Browser-Erweiterung „Haben für Mein ELSTER“ (TypeScript, Vite) |
 | `apps/firmenportal` | Firmenportal über den Instanzen (#504): Anmeldung per SSO, Links auf die Firmen der Person, ohne Datenbank (Bun, HTML auf dem Server); `deploy/firmenportal`: Compose-Vorlage |
@@ -365,9 +365,20 @@ Die Parser liegen in `packages/import/src/`. Ohne eigenen Parser liest Haben ein
 
 Das Format wird als Text in `bank_imports.format` gespeichert; eine Migration ist dafür nicht nötig. Liefert die Datei keine eigene IBAN, muss das Konto vor dem Import angelegt werden (wie bei N26).
 
+## Neuer Zahlungsdienstleister
+
+Ein Zahlungsdienstleister mit API läuft über die gemeinsame Anbindung im Modul `zahlungsdienstleister` ([#1729](https://github.com/Speicherstadt/haben/issues/1729)): Client und Lieferung in `packages/import/src/<anbieter>/`, ein Adapter nach dem Vertrag in `adapter.ts` und sein Eintrag in `anbieter.ts`. Tabelle, Zeitplan und Einstellungen nehmen ihn ohne Migration auf; dazu kommt er in einige feste Listen (`PAYMENT_PROVIDERS`, interne Quellen, Formatnamen). Die Schritte stehen im Skill [`anbindung-hinzufuegen`](https://github.com/Speicherstadt/haben/blob/main/.claude/skills/anbindung-hinzufuegen/SKILL.md).
+
 ## Neue Ausgabenkategorie
 
-Die Kategorien stehen in `EXPENSE_CATEGORIES` in `packages/core/src/kontenplan.ts`, je mit Bezeichnung und Aufwandskonto für SKR03 und SKR04. Ein neuer Eintrag erscheint automatisch in der Auswahl am Beleg, in der Anweisung für die KI-Auslesung, im Journal und in der EÜR. Die Kategorie steht als Text am Beleg, eine Migration ist nicht nötig. Für übernommene Lexoffice-Belege kannst du in `apps/web/src/server/modules/archiv/legacy-open.ts` (`CATEGORY_HINTS`) ein Suchmuster ergänzen. Die Kontonummern stimmst du mit der Steuerberatung ab.
+Die Kategorien stehen in `EXPENSE_CATEGORIES` in `packages/core/src/kontenplan.ts`, je mit Bezeichnung, Aufwandskonto für SKR03 und SKR04 und unter `nicht` dem, was für sie nicht gilt (leer: alles gilt; die Gründe stehen bei `KategorieEigenschaft`):
+
+- `aufwand`: Betriebsausgabe in EÜR und BWA
+- `direkt`: unter „Direkt buchen“ ohne Beleg
+- `eigenesKonto`: Elternkategorie eines eigenen Kontos
+- `dauerbeleg`: Vorlage für Dauerbelege
+
+Ein neuer Eintrag erscheint automatisch in der Auswahl am Beleg, in der Anweisung für die KI-Auslesung, im Journal und in der EÜR. Ist er Aufwand, verlangt der Typecheck seine Zeile der Anlage EÜR (`EUER_CATEGORY_FIELDS` in `jahreserklaerung/annual.ts`) und seine Position in der E-Bilanz (`KATEGORIEN` in `ebilanz.ts`). Die Kategorie steht als Text am Beleg, eine Migration ist nicht nötig. Für übernommene Lexoffice-Belege kannst du in `apps/web/src/server/modules/archiv/legacy-open.ts` (`CATEGORY_HINTS`) ein Suchmuster ergänzen. Die Kontonummern stimmst du mit der Steuerberatung ab.
 
 ## Veröffentlichen
 

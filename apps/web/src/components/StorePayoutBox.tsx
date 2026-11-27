@@ -4,6 +4,7 @@ import { useState } from "react";
 import { formatDate } from "../lib/format.ts";
 import type { getBankOverview } from "../server/functions/bank.ts";
 import { takeOverStorePayoutFn } from "../server/functions/stores.ts";
+import { type Auswahl, auswahlFuer, umgeschaltet } from "./store-payout-auswahl.ts";
 
 type StorePayoutView = NonNullable<NonNullable<Awaited<ReturnType<typeof getBankOverview>>["detail"]>["storePayout"]>;
 
@@ -25,15 +26,16 @@ export function StorePayoutBox({
   run: (work: () => Promise<unknown>) => void;
 }) {
   const takeOver = useServerFn(takeOverStorePayoutFn);
-  const [chosen, setChosen] = useState(() => new Set(view.months.filter((m) => m.suggested).map((m) => m.id)));
+  const [auswahl, setAuswahl] = useState<Auswahl | null>(null);
+  const chosen = auswahlFuer(view.months, auswahl);
   const sum = view.months.filter((m) => chosen.has(m.id)).reduce((s, m) => s + m.amount, 0);
   const difference = amount - sum;
 
   if (!view.accountName) {
     return (
       <div className="banner banner-info" role="status">
-        Eingang von {view.label}: Lege unter Bank ein Konto der Art Zahlungsdienstleister mit Anbieter {view.label} an, dann übernimmt Haben die Monatsberichte
-        und diese Auszahlung.
+        Eingang von {view.label}: Lege unter Konto verbinden › Zahlungsdienstleister hinzufügen das Konto für {view.label} an, dann übernimmt Haben die
+        Monatsberichte und diese Auszahlung.
       </div>
     );
   }
@@ -44,15 +46,6 @@ export function StorePayoutBox({
         Bank abrufen.
       </div>
     );
-  }
-
-  function toggle(id: string) {
-    setChosen((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
   }
 
   return (
@@ -67,7 +60,12 @@ export function StorePayoutBox({
         </p>
         {view.months.map((month) => (
           <label key={month.id} className="checkbox">
-            <input type="checkbox" checked={chosen.has(month.id)} onChange={() => toggle(month.id)} disabled={busy} />
+            <input
+              type="checkbox"
+              checked={chosen.has(month.id)}
+              onChange={() => setAuswahl((current) => umgeschaltet(view.months, current, month.id))}
+              disabled={busy}
+            />
             <span>
               {formatDate(month.bookingDate)} · <span className="amount">{formatEuro(month.amount)}</span>
               <span className="small muted" style={{ display: "block" }}>

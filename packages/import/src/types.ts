@@ -32,6 +32,8 @@ export type StatementFormat =
   | "stripe-api"
   | "shopify-payments-csv"
   | "ebay-csv"
+  /** Abrechnung (Settlement Report) eines Amazon-Marktplatzes, Tab-getrennt (Seller Central › Berichte › Zahlungen) */
+  | "amazon-settlement"
   | "etsy-csv"
   /** Zahlungsverlauf von Etsy Payments über die Open API v3 (kein Dateiimport) */
   | "etsy-ledger"
@@ -50,6 +52,7 @@ export const PSP_FORMATS: StatementFormat[] = [
   "stripe-api",
   "shopify-payments-csv",
   "ebay-csv",
+  "amazon-settlement",
   "etsy-csv",
   "etsy-ledger",
   "googleplay-earnings",
@@ -68,6 +71,11 @@ export interface ParsedTransaction {
   counterpartyName: string;
   counterpartyIban?: string;
   purpose: string;
+  /**
+   * Zweck, aus dem der Dubletten-Hash gebildet wird, wenn er vom gezeigten abweicht: Der Abruf von Stripe zeigt die Metadaten
+   * der Zahlung, erkennt dieselbe Zeile des CSV-Exports aber an dessen Zweck wieder (`stripeStatement`). Fehlt er, gilt `purpose`.
+   */
+  hashPurpose?: string;
   /** Buchungsart der Bank, z. B. "Überweisung", "Lastschrift" */
   type?: string;
   /** Referenz der Bank, falls vorhanden (CAMT AcctSvcrRef, EndToEndId) */
@@ -95,6 +103,8 @@ export interface ParsedStatement {
   currency: string;
   periodFrom?: string;
   periodTo?: string;
+  /** Marktplatz der Datei, falls sie einen nennt (Amazon: `marketplace-name`, z. B. „Amazon.de“); dient dem Abgleich mit dem Konto */
+  marketplace?: string;
   /** Saldo vor dem ersten bzw. nach dem letzten Umsatz, falls die Datei ihn nennt */
   openingBalance?: Cents;
   closingBalance?: Cents;

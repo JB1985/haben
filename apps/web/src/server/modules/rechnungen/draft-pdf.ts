@@ -6,7 +6,8 @@ import { UserError } from "../../errors.ts";
 import { ansprechpartnerSnapshot, loadCompany, loadLetterhead, loadUnitCodes, withCustomLayout } from "../stammdaten/index.ts";
 import { invoiceDocumentTotals, invoiceTotalsById } from "./invoice-taxes.ts";
 import { deductedRefs } from "./advance-deductions.ts";
-import { buyerFrom, documentFor, sellerFrom } from "./invoice-document.ts";
+import { buyerFrom, documentFor, draftSeller } from "./invoice-document.ts";
+import { loadReplacement } from "./invoice-replacement.ts";
 import { getInvoice } from "./invoices.ts";
 import { getQuote, quoteDocumentFor } from "./quotes.ts";
 import { angebotMitPlatzhaltern, rechnungMitPlatzhaltern } from "./beleg-platzhalter.ts";
@@ -33,6 +34,7 @@ export async function invoiceDraftPdf(id: string): Promise<DraftPdf | null> {
   const buyer = original?.buyer ?? (contact ? buyerFrom(contact, await ansprechpartnerSnapshot(db, invoice.contactPersonId)) : null);
   if (!buyer) throw new DraftPdfError(NO_CUSTOMER);
   const company = await loadCompany();
+  const prior = corrects ?? (await loadReplacement(invoice, db));
   // Die Nummer setzt renderInvoiceDraftPdf
   const { number: _none, ...doc } = rechnungMitPlatzhaltern(
     documentFor(
@@ -40,10 +42,10 @@ export async function invoiceDraftPdf(id: string): Promise<DraftPdf | null> {
       lines,
       await invoiceDocumentTotals(id),
       (await invoiceTotalsById([id])).get(id)!,
-      sellerFrom(company),
+      await draftSeller(db, company, invoice),
       buyer,
       "",
-      corrects?.number ? { number: corrects.number, issueDate: corrects.issueDate } : null,
+      prior?.number ? { number: prior.number, issueDate: prior.issueDate } : null,
       await deductedRefs(lines),
       await directDebitFor(invoice, company, db),
       await loadUnitCodes(),
@@ -61,7 +63,7 @@ export async function quoteDraftPdf(id: string): Promise<DraftPdf | null> {
     quoteDocumentFor(
       data.quote,
       data.lines,
-      sellerFrom(await loadCompany()),
+      await draftSeller(db, await loadCompany(), data.quote),
       buyerFrom(data.contact, await ansprechpartnerSnapshot(db, data.quote.contactPersonId)),
       "",
     ),

@@ -236,3 +236,45 @@ describe("parseDatevStammdaten", () => {
     expect(rows.map((r) => r.name)).toEqual(["Bäckerei Süß"]);
   });
 });
+
+// Stamm aus BuchhaltungsButler (#1829): dieselben Spalten wie oben, drei Köpfe anders geschrieben; Werte erfunden
+describe("parseDatevStammdaten: Köpfe von BuchhaltungsButler", () => {
+  const bbName = (name: string) => name.replace("Adressatentyp", "Adressattyp").replace("EU-Mitgliedstaat", "EU-Land").replace("EU-UStId.", "EU-UStID");
+  const bbColumns = COLUMNS.map(bbName);
+  const bbRow = (values: Record<string, string>) => {
+    // Jede Angabe muss eine Spalte treffen, sonst prüfte der Test nichts
+    for (const name of Object.keys(values)) expect(bbColumns).toContain(name);
+    return bbColumns.map((name) => values[name] ?? "").join(";");
+  };
+  const bb = (...lines: string[]) => parsed(new TextEncoder().encode([HEADER, bbColumns.join(";"), ...lines].join("\r\n"))).rows;
+
+  it("schreibt die drei Köpfe anders als sevDesk", () => {
+    expect(bbColumns).toEqual(expect.arrayContaining(["Name (Adressattyp Unternehmen)", "Name (Adressattyp keine Angabe)", "EU-Land", "EU-UStID"]));
+    expect(bbColumns.join(";")).not.toMatch(/Adressatentyp|EU-Mitgliedstaat|EU-UStId\./);
+  });
+
+  it("liest Konto, Namen von Unternehmen, Person und „keine Angabe“ und die USt-IdNr.", () => {
+    const rows = bb(
+      bbRow({ Konto: "10000", "Name (Adressattyp Unternehmen)": "Beispiel GmbH", "EU-Land": "DE", "EU-UStID": "136695976" }),
+      bbRow({ Konto: "69999", "Vorname (Adressattyp natürl. Person)": "Erika", "Name (Adressattyp natürl. Person)": "Muster" }),
+      bbRow({ Konto: "70000", "Name (Adressattyp keine Angabe)": "Ohne Angabe", "EU-Land": "AT", "EU-UStID": "ATU12345678" }),
+      bbRow({ Konto: "99999", "Name (Adressattyp Unternehmen)": "Lieferant AG" }),
+    );
+    expect(rows.map((r) => [r.nr, r.rolle, r.name, r.ustId, r.errors])).toEqual([
+      [10000, "debitor", "Beispiel GmbH", "DE136695976", []],
+      [69999, "debitor", "Erika Muster", "", []],
+      [70000, "kreditor", "Ohne Angabe", "ATU12345678", []],
+      [99999, "kreditor", "Lieferant AG", "", []],
+    ]);
+  });
+
+  it("übernimmt eine Zeile mit Zahl in „EU-Land“ ohne USt-IdNr. und ohne Fehler", () => {
+    const [zeile] = bb(bbRow({ Konto: "70001", "Name (Adressattyp Unternehmen)": "Zahl KG", "EU-Land": "19", "EU-UStID": "199405147" }));
+    expect([zeile!.name, zeile!.ustId, zeile!.errors]).toEqual(["Zahl KG", "", []]);
+  });
+
+  it("meldet eine falsche USt-IdNr. mit Länderkürzel weiter als Fehler", () => {
+    const [zeile] = bb(bbRow({ Konto: "70002", "Name (Adressattyp Unternehmen)": "Falsch KG", "EU-Land": "DE", "EU-UStID": "12" }));
+    expect(zeile!.errors).toEqual(["USt-IdNr.: „DE12“ hat eine falsche Prüfziffer"]);
+  });
+});

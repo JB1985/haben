@@ -3,7 +3,16 @@ import { NAV_BACKGROUNDS } from "@haben/core";
 import { describe, expect, it } from "vitest";
 import type { IconName } from "../components/Icon.tsx";
 import { BEREICHE } from "./bereiche.ts";
-import { firmaInNavigation, NAV_GROUPS, type NavBedingung, navLinkSichtbar, navMark, STEUERBERATUNG_NAV, sichtbareNavSeiten } from "./navigation.ts";
+import {
+  aktiverNavLink,
+  firmaInNavigation,
+  NAV_GROUPS,
+  type NavBedingung,
+  navLinkSichtbar,
+  navMark,
+  STEUERBERATUNG_NAV,
+  sichtbareNavSeiten,
+} from "./navigation.ts";
 
 /** Lohn ohne Bedingung */
 const lohn: NavBedingung = {};
@@ -41,6 +50,16 @@ describe("navLinkSichtbar mit ausgeblendeten Bereichen", () => {
 
   it("ignoriert Unbekanntes aus älteren Ständen", () => {
     expect(navLinkSichtbar({ to: "/rechnungen" }, { gesellschaft: false, hatMitarbeiter: false, ausgeblendet: ["rechnungen"] })).toBe(true);
+  });
+
+  it("lässt mit „Rechnungen schreiben“ und „Mahnwesen“ die Rechnungen im Menü, Artikel, Zeiteinträge und Textbausteine fallen weg", () => {
+    const kontext = {
+      gesellschaft: false,
+      hatMitarbeiter: false,
+      ausgeblendet: ["rechnungserstellung", "mahnwesen", "artikel", "zeiteintraege", "textbausteine"],
+    };
+    expect(navLinkSichtbar({ to: "/rechnungen" }, kontext)).toBe(true);
+    for (const to of ["/artikel", "/leistungen", "/textbausteine"]) expect(navLinkSichtbar({ to }, kontext)).toBe(false);
   });
 });
 
@@ -186,5 +205,65 @@ describe("Symbole der Arbeitsbereiche", () => {
       const linkSymbole = new Set(gruppen.flatMap((gruppe) => gruppe.links.map((link) => link.icon)));
       expect(gruppenSymbole.filter((symbol) => linkSymbole.has(symbol))).toEqual([]);
     }
+  });
+});
+
+// Gruppen nach Aufgabe (#1253): Der Satz unter dem Namen trennt „Ausgaben“ von „Geld“ und „Steuern“ von „Buchhaltung“,
+// eingeklappt im Flyout und in der Schnellsuche
+describe("Hinweise der Arbeitsbereiche", () => {
+  // Ohne eigenen Doppelpunkt, denn die Schnellsuche setzt „Gruppe: Satz“ davor
+  it("hat jede Gruppe mit einem eigenen Satz in Klartext, eine Zeile ohne Klammern und Doppelpunkt", () => {
+    for (const gruppen of [NAV_GROUPS, STEUERBERATUNG_NAV]) {
+      for (const gruppe of gruppen) expect(gruppe.hinweis, gruppe.label).toMatch(/^[^():\n]{10,}$/);
+      const saetze = gruppen.map((gruppe) => gruppe.hinweis);
+      expect(new Set(saetze).size).toBe(saetze.length);
+    }
+  });
+
+  it("nennt der Satz einer Gruppe keine Seite einer anderen Gruppe", () => {
+    for (const gruppe of NAV_GROUPS)
+      for (const fremd of NAV_GROUPS.filter((andere) => andere !== gruppe).flatMap((andere) => andere.links))
+        if (!gruppe.links.some((link) => link.label === fremd.label))
+          expect(gruppe.hinweis, `${gruppe.label} nennt ${fremd.label}`).not.toMatch(new RegExp(`(^|[^\\p{L}])${fremd.label}([^\\p{L}]|$)`, "iu"));
+  });
+
+  it("trägt jede Seite der Schnellsuche den Satz ihrer Gruppe, Übersicht und Einstellungen keinen", () => {
+    const seiten = sichtbareNavSeiten({ inhaber: true, gesellschaft: false, hatMitarbeiter: true, eigeneSeiten: [] });
+    for (const gruppe of NAV_GROUPS)
+      for (const seite of seiten.filter((s) => s.group === gruppe.label)) {
+        expect(seite.hinweis, seite.label).toBeTruthy();
+        expect(seite.hinweis, seite.label).toBe(gruppe.hinweis);
+      }
+    for (const seite of seiten.filter((s) => ["Navigation", "Konto", "Einstellungen"].includes(s.group))) expect(seite.hinweis, seite.label).toBeUndefined();
+  });
+
+  it("gilt der Satz der Steuerberatung für ihre Seiten", () => {
+    const stb = sichtbareNavSeiten({ inhaber: false, gesellschaft: false, hatMitarbeiter: false, eigeneSeiten: [] });
+    const belege = stb.find((s) => s.to === "/belege");
+    expect(belege?.hinweis).toBeTruthy();
+    expect(belege?.hinweis).toBe(STEUERBERATUNG_NAV[0]?.hinweis);
+  });
+});
+
+describe("aktiverNavLink", () => {
+  it("markiert nur den Link, der am genauesten passt: Verbindungen statt Bank", () => {
+    expect(aktiverNavLink("/bank", NAV_GROUPS)).toBe("/bank");
+    expect(aktiverNavLink("/bank/verbindungen", NAV_GROUPS)).toBe("/bank/verbindungen");
+  });
+
+  it("zählt die geführte Einrichtung zu den Verbindungen", () => {
+    expect(aktiverNavLink("/bank/verbinden/stripe", NAV_GROUPS)).toBe("/bank/verbindungen");
+    // Nur ganze Abschnitte des Pfads: /bank/verbindenX ist keine Einrichtung
+    expect(aktiverNavLink("/bank/verbindenX", NAV_GROUPS)).toBe("/bank");
+  });
+
+  it("nimmt Unterseiten zum Link darüber und ohne passenden Link keinen", () => {
+    expect(aktiverNavLink("/rechnungen/abc", NAV_GROUPS)).toBe("/rechnungen");
+    expect(aktiverNavLink("/einstellungen", NAV_GROUPS)).toBeNull();
+  });
+
+  it("fällt auf Bank zurück, wenn Verbindungen nicht in der Navigation steht", () => {
+    const ohne = NAV_GROUPS.map((g) => ({ ...g, links: g.links.filter((l) => l.to !== "/bank/verbindungen") }));
+    expect(aktiverNavLink("/bank/verbindungen", ohne)).toBe("/bank");
   });
 });

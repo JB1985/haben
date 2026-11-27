@@ -22,13 +22,14 @@ function QuotePage() {
     return (
       <InvoiceEditor
         // nach dem Speichern mit den gespeicherten Werten neu aufsetzen, auch in derselben Sekunde (#1804)
-        key={`${quote.id}-${quote.updatedAt.toISOString()}`}
+        key={quote.updatedAt.toISOString()}
         action={draftAction}
         id={quote.id}
         kind="angebot"
         initial={{
           contactId: quote.contactId,
           contactPersonId: quote.contactPersonId,
+          bankverbindungId: quote.bankverbindungId,
           issueDate: quote.issueDate,
           validUntil: quote.validUntil,
           serviceFrom: quote.serviceFrom,
@@ -63,6 +64,8 @@ function QuotePage() {
         }}
         planTemplates={data.planTemplates}
         contactPersons={data.contactPersons}
+        bankverbindungen={data.bankverbindungen}
+        standardIban={data.standardIban}
         contacts={data.contacts}
         seller={data.company}
         sellerIssues={data.sellerIssues}

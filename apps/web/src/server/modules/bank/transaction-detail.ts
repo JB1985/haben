@@ -16,6 +16,7 @@ import { learnedDirectSuggestions } from "./learned-suggestions.ts";
 import { payoutCandidates, transferCounterpart, type TransferCounterpart } from "./transfers.ts";
 import { duplicateReviewsForTransaction } from "./duplicate-review.ts";
 import { transactionAllocations } from "./transaction-allocations.ts";
+import { reassignmentSources } from "./allocation-reassignment.ts";
 
 export async function transactionDetail(id: string) {
   const [tx] = await db
@@ -38,17 +39,18 @@ export async function transactionDetail(id: string) {
     .where(eq(schema.bankTransactions.id, id));
   if (!tx) return null;
   const allocations = await transactionAllocations(id);
+  const reassignment = tx.open === 0 || !allocations.some((allocation) => allocation.reversed) ? [] : await reassignmentSources(db, id);
 
   const duplicateReviews = await duplicateReviewsForTransaction(tx.id);
   const automatic = duplicateReviews.every((review) => review.decision === "distinct");
   // Offene Rechnungen und Belege, dazu Zahllast und Erstattung abgegebener Voranmeldungen
   const items = tx.open === 0 ? [] : [...(await openItems()), ...(await ustvaOpenItems())];
-  // Vorschläge für den noch offenen Teil des Umsatzes
-  const suggestions = !automatic || tx.open === 0 ? [] : suggestMatches({ ...tx, amount: tx.open }, items);
-  const candidates = items.filter((i) => Math.sign(i.open) === Math.sign(tx.amount));
   // Ohne Rechnung: Vorschlag aus dem Zweck der Konten, bei Geldtransit mit der Gegenbuchung auf dem anderen Konto
   const accounts = await ownAccounts();
   const account = accounts.find((a) => a.id === tx.bankAccountId);
+  // Vorschläge für den noch offenen Teil des Umsatzes; das Konto zählt für Rechnungen auf diese IBAN (#1887)
+  const suggestions = !automatic || tx.open === 0 ? [] : suggestMatches({ ...tx, amount: tx.open, kontoIban: account?.iban ?? null }, items);
+  const candidates = items.filter((i) => Math.sign(i.open) === Math.sign(tx.amount));
   // Sammelrechnung des Monats an einer Gebührenzeile eines Zahlungsdienstleisters (#680)
   const { sammelrechnung, sammelbeleg } = automatic ? await sammelrechnungVorschlag(tx, account?.purpose, items) : { sammelrechnung: null, sammelbeleg: null };
   let direct = automatic && account && tx.open === tx.amount ? suggestDirectBooking(tx, account, accounts) : null;
@@ -105,6 +107,7 @@ export async function transactionDetail(id: string) {
     duplicateReviews,
     transaction: tx,
     allocations,
+    reassignment,
     suggestions: vorschlaege,
     sammelrechnung,
     candidates,

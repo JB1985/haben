@@ -50,6 +50,8 @@ export const draftSchema = z
     advanceType: z.enum(["anzahlung", "teilleistung"]).nullable().optional(),
     /** Schlussrechnung: abzuziehende Abschlagsrechnungen */
     deducts: z.array(z.uuid()).max(50).default([]),
+    /** Normaler Rechnungsaustausch: die bereits festgeschriebene ursprüngliche Rechnung. */
+    replacesInvoiceId: z.uuid().nullable().optional(),
     /** Angebot, zu dem die Rechnung gehört (Abschlags- und Schlussrechnung, Rechnung aus dem Angebot) */
     quoteId: z.uuid().nullable().default(null),
     /** Währung der Rechnung; Preise und Summen in dieser Währung, gebucht wird in Euro mit dem Kurs */
@@ -75,6 +77,8 @@ export const draftSchema = z
     paidOn: isoDate.nullable().default(null),
     /** Ansprechpartner des Kunden (#424); der Stand beim Festschreiben steht im Käufer des Belegs */
     contactPersonId: z.uuid().nullable().default(null),
+    /** Zahlungskonto (#1887); null = Standard, fehlt = bisheriges bzw. bevorzugtes des Kontakts (bankverbindungFuerEntwurf) */
+    bankverbindungId: z.uuid().nullable().optional(),
   })
   .refine((d) => !d.serviceFrom || !d.serviceTo || d.serviceFrom <= d.serviceTo, {
     message: "Leistungszeitraum endet vor seinem Beginn",
