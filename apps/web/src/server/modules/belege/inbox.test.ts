@@ -654,4 +654,18 @@ describe.skipIf(!testDatabaseUrl)("Belege per E-Mail (Postgres)", () => {
     expect(audit[1]!.new_value).toMatchObject({ outbound_folder: "Ausgang" });
     expect(audit[1]!.new_value).not.toHaveProperty("ciphertext");
   });
+
+  it("schreibt Ablegen und Verwerfen einer Ausgangsrechnung ins Audit-Log und sperrt TRUNCATE (#660)", async () => {
+    await inbox.saveInboxSettings(actor, { ...settings, outboundFolder: "Ausgang" });
+    await deliverOut({ subject: "Rechnung AU-1", attachments: [{ filename: "AU-1.pdf", content: pdf("audit") }] });
+    await inbox.fetchInbox(actor);
+    const [eintrag] = await ausgang.listOutgoing();
+    await ausgang.discardOutgoing("pruefer", eintrag!.id);
+    const protokoll = await sql`select action, actor from audit_log where table_name = 'inbox_outgoing' and row_id = ${eintrag!.id} order by id`;
+    expect(protokoll.map((z) => [z.action, z.actor])).toEqual([
+      ["INSERT", actor],
+      ["UPDATE", "pruefer"],
+    ]);
+    await expect(sql`truncate inbox_outgoing`).rejects.toThrow(/darf nicht geleert werden|darf nur ergänzt werden/);
+  });
 });
