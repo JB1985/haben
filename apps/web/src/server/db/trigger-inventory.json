@@ -526,6 +526,20 @@
       "function": "public.haben_reject_truncate()"
     },
     {
+      "table": "public.bankverbindungen",
+      "name": "bankverbindungen_audit",
+      "enabled": "O",
+      "definition": "CREATE TRIGGER bankverbindungen_audit AFTER INSERT OR DELETE OR UPDATE ON public.bankverbindungen FOR EACH ROW EXECUTE FUNCTION public.haben_audit()",
+      "function": "public.haben_audit()"
+    },
+    {
+      "table": "public.bankverbindungen",
+      "name": "bankverbindungen_no_truncate",
+      "enabled": "O",
+      "definition": "CREATE TRIGGER bankverbindungen_no_truncate BEFORE TRUNCATE ON public.bankverbindungen FOR EACH STATEMENT EXECUTE FUNCTION public.haben_reject_truncate()",
+      "function": "public.haben_reject_truncate()"
+    },
+    {
       "table": "public.beleg_layouts",
       "name": "beleg_layouts_audit",
       "enabled": "O",
@@ -1472,6 +1486,20 @@
     },
     {
       "table": "public.invoices",
+      "name": "invoices_exempt_rule",
+      "enabled": "O",
+      "definition": "CREATE TRIGGER invoices_exempt_rule BEFORE UPDATE OF locked_at ON public.invoices FOR EACH ROW WHEN (((old.locked_at IS NULL) AND (new.locked_at IS NOT NULL) AND (new.kind = 'rechnung'::public.invoice_kind) AND (new.tax_treatment = ANY (ARRAY['steuerfrei'::text, 'ausfuhr'::text])) AND (new.lexoffice_voucher_id IS NULL))) EXECUTE FUNCTION public.haben_check_exempt_rule()",
+      "function": "public.haben_check_exempt_rule()"
+    },
+    {
+      "table": "public.invoices",
+      "name": "invoices_exempt_rule_insert",
+      "enabled": "O",
+      "definition": "CREATE TRIGGER invoices_exempt_rule_insert BEFORE INSERT ON public.invoices FOR EACH ROW WHEN (((new.locked_at IS NOT NULL) AND (new.kind = 'rechnung'::public.invoice_kind) AND (new.tax_treatment = ANY (ARRAY['steuerfrei'::text, 'ausfuhr'::text])) AND (new.lexoffice_voucher_id IS NULL))) EXECUTE FUNCTION public.haben_check_exempt_rule()",
+      "function": "public.haben_check_exempt_rule()"
+    },
+    {
+      "table": "public.invoices",
       "name": "invoices_locked",
       "enabled": "O",
       "definition": "CREATE TRIGGER invoices_locked BEFORE DELETE OR UPDATE ON public.invoices FOR EACH ROW EXECUTE FUNCTION public.haben_reject_locked()",
@@ -2101,20 +2129,6 @@
       "function": "public.haben_seal()"
     },
     {
-      "table": "public.paypal_connections",
-      "name": "paypal_connections_audit",
-      "enabled": "O",
-      "definition": "CREATE TRIGGER paypal_connections_audit AFTER INSERT OR DELETE OR UPDATE ON public.paypal_connections FOR EACH ROW EXECUTE FUNCTION public.haben_audit()",
-      "function": "public.haben_audit()"
-    },
-    {
-      "table": "public.paypal_connections",
-      "name": "paypal_connections_no_truncate",
-      "enabled": "O",
-      "definition": "CREATE TRIGGER paypal_connections_no_truncate BEFORE TRUNCATE ON public.paypal_connections FOR EACH STATEMENT EXECUTE FUNCTION public.haben_reject_truncate()",
-      "function": "public.haben_reject_truncate()"
-    },
-    {
       "table": "public.payroll_runs",
       "name": "payroll_runs_audit",
       "enabled": "O",
@@ -2227,6 +2241,27 @@
       "function": "public.haben_reject_truncate()"
     },
     {
+      "table": "public.postfach_erledigt",
+      "name": "postfach_erledigt_append_only",
+      "enabled": "O",
+      "definition": "CREATE TRIGGER postfach_erledigt_append_only BEFORE DELETE OR UPDATE ON public.postfach_erledigt FOR EACH ROW EXECUTE FUNCTION public.haben_append_only()",
+      "function": "public.haben_append_only()"
+    },
+    {
+      "table": "public.postfach_erledigt",
+      "name": "postfach_erledigt_audit",
+      "enabled": "O",
+      "definition": "CREATE TRIGGER postfach_erledigt_audit AFTER INSERT ON public.postfach_erledigt FOR EACH ROW EXECUTE FUNCTION public.haben_audit()",
+      "function": "public.haben_audit()"
+    },
+    {
+      "table": "public.postfach_erledigt",
+      "name": "postfach_erledigt_no_truncate",
+      "enabled": "O",
+      "definition": "CREATE TRIGGER postfach_erledigt_no_truncate BEFORE TRUNCATE ON public.postfach_erledigt FOR EACH STATEMENT EXECUTE FUNCTION public.haben_reject_truncate()",
+      "function": "public.haben_reject_truncate()"
+    },
+    {
       "table": "public.postfach_requests",
       "name": "postfach_requests_append_only",
       "enabled": "O",
@@ -2259,6 +2294,20 @@
       "name": "procedure_details_no_truncate",
       "enabled": "O",
       "definition": "CREATE TRIGGER procedure_details_no_truncate BEFORE TRUNCATE ON public.procedure_details FOR EACH STATEMENT EXECUTE FUNCTION public.haben_reject_truncate()",
+      "function": "public.haben_reject_truncate()"
+    },
+    {
+      "table": "public.psp_connections",
+      "name": "psp_connections_audit",
+      "enabled": "O",
+      "definition": "CREATE TRIGGER psp_connections_audit AFTER INSERT OR DELETE OR UPDATE ON public.psp_connections FOR EACH ROW EXECUTE FUNCTION public.haben_audit()",
+      "function": "public.haben_audit()"
+    },
+    {
+      "table": "public.psp_connections",
+      "name": "psp_connections_no_truncate",
+      "enabled": "O",
+      "definition": "CREATE TRIGGER psp_connections_no_truncate BEFORE TRUNCATE ON public.psp_connections FOR EACH STATEMENT EXECUTE FUNCTION public.haben_reject_truncate()",
       "function": "public.haben_reject_truncate()"
     },
     {
@@ -2805,20 +2854,6 @@
       "name": "store_reports_no_truncate",
       "enabled": "O",
       "definition": "CREATE TRIGGER store_reports_no_truncate BEFORE TRUNCATE ON public.store_reports FOR EACH STATEMENT EXECUTE FUNCTION public.haben_reject_truncate()",
-      "function": "public.haben_reject_truncate()"
-    },
-    {
-      "table": "public.stripe_connections",
-      "name": "stripe_connections_audit",
-      "enabled": "O",
-      "definition": "CREATE TRIGGER stripe_connections_audit AFTER INSERT OR DELETE OR UPDATE ON public.stripe_connections FOR EACH ROW EXECUTE FUNCTION public.haben_audit()",
-      "function": "public.haben_audit()"
-    },
-    {
-      "table": "public.stripe_connections",
-      "name": "stripe_connections_no_truncate",
-      "enabled": "O",
-      "definition": "CREATE TRIGGER stripe_connections_no_truncate BEFORE TRUNCATE ON public.stripe_connections FOR EACH STATEMENT EXECUTE FUNCTION public.haben_reject_truncate()",
       "function": "public.haben_reject_truncate()"
     },
     {
@@ -3483,6 +3518,14 @@
       "definitionHash": "4c1b6cc32d7f1f8355622c9fa8f651333efa9cbb40703fb9a366df44c36b695f"
     },
     {
+      "name": "public.haben_check_exempt_rule()",
+      "config": [],
+      "language": "plpgsql",
+      "securityDefiner": false,
+      "sourceHash": "6f9d1996872d0f5d92979512e97e32f906b22081ad0f357401a9907d59b979c1",
+      "definitionHash": "186b5fb6c167bef7615fda7919400ab0a164b837bb1582dc626a06ab21c7d9b0"
+    },
+    {
       "name": "public.haben_check_invitation_update()",
       "config": [],
       "language": "plpgsql",
@@ -3679,8 +3722,8 @@
       "config": [],
       "language": "plpgsql",
       "securityDefiner": false,
-      "sourceHash": "f627f7cf0829fc6abdeed98e7a584c0e6b6295d25e65336bddf96d734afb44f9",
-      "definitionHash": "4ae0722b8092ef458d0e6564521ffd631d9ab7ce7a7b0cf7d004cc141d1a6040"
+      "sourceHash": "1fc63ab0a25c90d55c98728a2722ba55b5288ef993eda16d5bf8163b884babec",
+      "definitionHash": "2df4b013a99411fd8e76648f14ac2819b9df2d80c4b5275009beed055f91989a"
     },
     {
       "name": "public.haben_reject_locked()",
@@ -3946,6 +3989,7 @@
     { "table": "public.vat_returns", "column": "kz46", "expression": "0" },
     { "table": "public.vat_returns", "column": "kz47", "expression": "0" },
     { "table": "public.vat_returns", "column": "kz48", "expression": "0" },
+    { "table": "public.vat_returns", "column": "kz50", "expression": "0" },
     { "table": "public.vat_returns", "column": "kz61", "expression": "0" },
     { "table": "public.vat_returns", "column": "kz62", "expression": "0" },
     { "table": "public.vat_returns", "column": "kz66", "expression": "0" },

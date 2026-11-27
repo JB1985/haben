@@ -26,8 +26,8 @@ function InvoicePage() {
     return (
       <>
         <InvoiceEditor
-          // nach dem Speichern mit den gespeicherten Werten neu aufsetzen
-          key={`${invoice.id}-${String(invoice.updatedAt)}`}
+          // nach dem Speichern mit den gespeicherten Werten neu aufsetzen, auch in derselben Sekunde (#1804)
+          key={invoice.updatedAt.toISOString()}
           action={draftAction}
           id={invoice.id}
           kind={invoice.kind}
@@ -43,11 +43,14 @@ function InvoicePage() {
           numberFormat={data.numberFormat}
           lastFinalized={data.lastFinalized}
           corrects={data.corrects}
+          replaces={data.replaces}
           bundesland={data.bundesland}
           kleinunternehmer={data.kleinunternehmer}
           companySkonto={data.companySkonto}
           mandates={data.mandates}
           contactPersons={data.contactPersons}
+          bankverbindungen={data.bankverbindungen}
+          standardIban={data.standardIban}
           articles={data.articles}
           units={data.units}
           textBlocks={data.textBlocks}
@@ -78,6 +81,7 @@ function draftInitial(data: Detail, invoice: Detail["invoice"]): InvoiceEditorPr
   return {
     contactId: invoice.contactId,
     contactPersonId: invoice.contactPersonId,
+    bankverbindungId: invoice.bankverbindungId,
     issueDate: invoice.issueDate,
     serviceFrom: invoice.serviceFrom,
     serviceTo: invoice.serviceTo,

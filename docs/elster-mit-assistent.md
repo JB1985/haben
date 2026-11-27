@@ -58,11 +58,11 @@ Voraussetzungen: Chrome oder Edge (andere Chromium-Browser wie Brave gehen auch)
 2. In den Einstellungen der Erweiterung Websites nur für `elster.de` freigeben.
 3. Claude Code mit Chrome starten:
 
-   ```bash
-   claude --chrome
-   ```
+    ```bash
+    claude --chrome
+    ```
 
-   In einer laufenden Sitzung geht auch `/chrome`. Dort siehst du den Verbindungsstatus und wählst den Browser, falls mehrere verbunden sind.
+    In einer laufenden Sitzung geht auch `/chrome`. Dort siehst du den Verbindungsstatus und wählst den Browser, falls mehrere verbunden sind.
 
 Nimm die Erweiterung zusammen mit Claude Code, nicht allein im Seitenpanel von Chrome. Allein bräuchte sie das Haben-MCP als Connector, den die Server von Anthropic aus dem Internet erreichen. Ein Haben im Heimnetz ist so nicht erreichbar, und freigeben willst du es dafür meist nicht.
 
@@ -131,7 +131,7 @@ Maßgeblich ist immer die Kennzahl. Abschnitte und Bezeichnungen folgen dem amtl
 
 ## Grenzen
 
-- **Die Abgabe vermerkst du selbst in Haben**, unter **Außerhalb von Haben abgegeben** auf der Seite der Voranmeldung, mit Tag, Transferticket, Kz 83 und Protokoll ([Abgabe vermerken](umsatzsteuer.md#abgabe-außerhalb-von-haben-vermerken)). Der Assistent kann das nicht: Der MCP-Zugang liest nur.
+- **Die Abgabe vermerkst du selbst in Haben**, unter **Schon anders abgegeben?** im Bereich **Außerhalb von Haben abgegeben** auf der Seite der Voranmeldung, mit Tag, Transferticket, Kz 83 und Protokoll ([Abgabe vermerken](umsatzsteuer.md#abgabe-außerhalb-von-haben-vermerken)). Der Assistent kann das nicht: Der MCP-Zugang liest nur.
 - **Kein Ersatz für ERiC:** kein Senden aus Haben heraus, kein Postfachabruf, keine Übernahme von Bescheiden. Wer eine Hersteller-ID hat, sendet weiter direkt aus Haben.
 - **Nur die Voranmeldung.** Für die Jahreserklärungen (Umsatzsteuererklärung, Anlage EÜR, Einkommensteuer) gibt es noch keine Ausfüllliste; das Werkzeug `jahreserklaerung` liefert nur Summen, Hinweise und die Steuerprognose, nicht die einzelnen Zeilen.
 - **Abgesendet wird nur von dir.**

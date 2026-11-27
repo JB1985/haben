@@ -47,7 +47,9 @@ import { assertNumberingCurrent, circleContact, circleFor, customerNumberConflic
 import { quoteDraftLineSchema } from "./draft-line.ts";
 import { openAbschlaege } from "./advance-deductions.ts";
 import { effectivePriceMode } from "./draft-schema.ts";
-import { buyerFrom, buyerIssues, invoiceDiscountOf, lineDiscountOf, sellerFrom } from "./invoice-document.ts";
+import { bankverbindungFuerEntwurf, uebernommeneBankverbindung } from "./beleg-bankverbindung.ts";
+import type { ExternalReference } from "./external-reference.ts";
+import { buyerFrom, buyerIssues, draftSeller, invoiceDiscountOf, lineDiscountOf } from "./invoice-document.ts";
 import { insertDraft } from "./invoice-drafts.ts";
 import type { Invoice } from "./invoices.ts";
 import { removeFiles, unusedFiles } from "./attachment-store.ts";
@@ -77,6 +79,8 @@ export const quoteDraftSchema = z
     contactId: z.uuid().nullable(),
     /** Ansprechpartner des Kunden (#424); der Stand beim Festschreiben steht im Käufer des Angebots */
     contactPersonId: z.uuid().nullable().default(null),
+    /** Zahlungskonto (#1887); null = Standard, fehlt = bisheriges bzw. bevorzugtes des Kontakts (bankverbindungFuerEntwurf) */
+    bankverbindungId: z.uuid().nullable().optional(),
     issueDate: isoDate,
     validUntil: isoDate,
     serviceFrom: isoDate.nullable(),
@@ -175,12 +179,13 @@ function lineRows(quoteId: string, input: QuoteDraftInput) {
   }));
 }
 
-function draftValues(input: QuoteDraftInput) {
+function draftValues(input: QuoteDraftInput, bankverbindungId: string | null) {
   const priceMode = effectivePriceMode(input);
   const { totals } = quoteCalculation(input.lines, priceMode, input.discount ?? null);
   return {
     contactId: input.contactId,
     contactPersonId: input.contactPersonId ?? null,
+    bankverbindungId,
     issueDate: input.issueDate,
     validUntil: input.validUntil,
     serviceFrom: input.serviceFrom,
@@ -202,10 +207,14 @@ function draftValues(input: QuoteDraftInput) {
 }
 
 /** Legt den Entwurf an; parsed ist schon durch quoteDraftSchema gelaufen */
-async function insertQuoteDraft(tx: Tx, parsed: z.output<typeof quoteDraftSchema>): Promise<Quote> {
+async function insertQuoteDraft(tx: Tx, parsed: z.output<typeof quoteDraftSchema>, reference?: ExternalReference): Promise<Quote> {
   const personProblem = await contactPersonProblem(tx, parsed.contactId, parsed.contactPersonId);
   if (personProblem) throw new QuoteError(personProblem);
-  const [quote] = await tx.insert(schema.quotes).values(draftValues(parsed)).returning();
+  const bankverbindungId = await bankverbindungFuerEntwurf(tx, parsed.bankverbindungId, parsed.contactId, null, (m) => new QuoteError(m));
+  const [quote] = await tx
+    .insert(schema.quotes)
+    .values({ ...draftValues(parsed, bankverbindungId), ...reference })
+    .returning();
   if (parsed.lines.length > 0) await tx.insert(schema.quoteLines).values(lineRows(quote!.id, parsed));
   return quote!;
 }
@@ -217,12 +226,21 @@ async function checkCustomer(tx: Tx, contactId: string | null) {
   if (problem) throw new QuoteError(problem);
 }
 
+export async function findQuoteIdByReference(reference: ExternalReference): Promise<string | undefined> {
+  const { quotes } = schema;
+  const [quote] = await db
+    .select({ id: quotes.id })
+    .from(quotes)
+    .where(and(eq(quotes.externalSource, reference.externalSource), eq(quotes.externalId, reference.externalId)));
+  return quote?.id;
+}
+
 /** Neuer Entwurf; er bekommt die Standardanhänge aus den Einstellungen (#415) als eigene Anhänge */
-export async function createQuoteDraft(actor: string, input: QuoteDraftInput): Promise<Quote> {
+export async function createQuoteDraft(actor: string, input: QuoteDraftInput, reference?: ExternalReference): Promise<Quote> {
   const parsed = quoteDraftSchema.parse(input);
   return withActor(actor, async (tx) => {
     await checkCustomer(tx, parsed.contactId);
-    const quote = await insertQuoteDraft(tx, parsed);
+    const quote = await insertQuoteDraft(tx, parsed, reference);
     // Mit ihrem Zeitpunkt aus den Einstellungen, wie beim Kopieren: so bleibt deren Reihenfolge
     await attachStoredToQuote(tx, quote.id, await listQuoteDefaultAttachments(tx));
     return quote;
@@ -249,7 +267,8 @@ export async function updateQuoteDraft(actor: string, id: string, input: QuoteDr
     if (personProblem) throw new QuoteError(personProblem);
     await tx.delete(schema.quoteLines).where(eq(schema.quoteLines.quoteId, id));
     if (parsed.lines.length > 0) await tx.insert(schema.quoteLines).values(lineRows(id, parsed));
-    const [updated] = await tx.update(schema.quotes).set(draftValues(parsed)).where(eq(schema.quotes.id, id)).returning();
+    const bankverbindungId = await bankverbindungFuerEntwurf(tx, parsed.bankverbindungId, parsed.contactId, draft, (m) => new QuoteError(m));
+    const [updated] = await tx.update(schema.quotes).set(draftValues(parsed, bankverbindungId)).where(eq(schema.quotes.id, id)).returning();
     return updated!;
   });
 }
@@ -456,6 +475,8 @@ export async function quoteIssues(id: string): Promise<string[]> {
       sellerUstId: company.ustId,
       buyerUstId: contact?.ustId,
       buyerCountry: contact?.land,
+      buyerPostalCode: contact?.plz,
+      foreignPlace: quote.taxDetails?.foreignPlace,
       exemptionReason: quote.exemptionReason,
     }),
   );
@@ -482,7 +503,7 @@ export async function finalizeQuote(actor: string, id: string): Promise<Quote> {
     const company = await loadCompany(tx);
     const lines = await tx.select().from(schema.quoteLines).where(eq(schema.quoteLines.quoteId, id)).orderBy(asc(schema.quoteLines.position));
     const [contact] = await tx.select().from(schema.contacts).where(eq(schema.contacts.id, quote.contactId!));
-    const seller = sellerFrom(company);
+    const seller = await draftSeller(tx, company, quote);
     const buyer = buyerFrom(contact!, await ansprechpartnerSnapshot(tx, quote.contactPersonId));
     // Wie bei Rechnungen: Nummer lesen, PDF erzeugen, erst dann schreiben (number-counter.ts); {KUNDENNR} wird zur
     // Kundennummer des Käufers, der Kreis beim Zähler je Kunde der des Kunden (#1426)
@@ -513,6 +534,8 @@ export async function finalizeQuote(actor: string, id: string): Promise<Quote> {
         numberContactId,
         contactVersion: contact!.version,
         seller,
+        // Ab hier gilt die Kopie des Zahlungskontos im Verkäufer; ohne Verweis lässt sich das Konto löschen (#1887)
+        bankverbindungId: null,
         buyer,
         net: doc.totals.net,
         tax: doc.totals.tax,
@@ -608,6 +631,7 @@ export async function quoteToInvoice(
       {
         contactId: locked.contactId,
         contactPersonId,
+        bankverbindungId: await uebernommeneBankverbindung(tx, locked),
         issueDate: today,
         serviceFrom: newFinal ? today : locked.serviceFrom,
         serviceTo: newFinal ? null : locked.serviceTo,
@@ -662,6 +686,7 @@ export async function copyQuote(actor: string, id: string, today: string): Promi
   const validDays = Math.max(0, Math.round((Date.parse(quote.validUntil) - Date.parse(quote.issueDate)) / 86_400_000));
   const input: QuoteDraftInput = {
     contactId: quote.contactId,
+    bankverbindungId: await uebernommeneBankverbindung(db, quote),
     // Eine Kopie behält die Person, solange sie noch aktiv ist
     contactPersonId: quote.contactPersonId && (await contactPersonProblem(db, quote.contactId, quote.contactPersonId)) === null ? quote.contactPersonId : null,
     issueDate: today,

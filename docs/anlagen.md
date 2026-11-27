@@ -17,6 +17,8 @@ Wirtschaftsgüter, die länger als ein Jahr im Betrieb bleiben und mehr als 800 
 
 In der EÜR steht die AfA schon vorher, sobald die Anlage im Verzeichnis ist.
 
+Bis die gespeicherte Anlage geladen ist, sind die Felder beim Übernehmen und auf der Seite der Anlage kurz gesperrt, damit keine Eingabe verloren geht.
+
 ## Art und Abschreibung
 
 | Art | Vorschlag | Anlagekonto SKR03 / SKR04 | AfA-Konto SKR03 / SKR04 |
@@ -76,7 +78,17 @@ Für Elektrofahrzeuge nach § 9 Abs. 2 KraftStG, die du vom 01.07.2025 bis 31.12
 
 Das Gesetz nennt die Staffel „Absetzung für Abnutzung“, nicht Sonderabschreibung. Sie steht deshalb in der Anlage EÜR in der Zeile **AfA auf bewegliche Wirtschaftsgüter** und in der Anlage AVEÜR in der Spalte AfA; die Spalte für Sonderabschreibungen ist § 7g EStG vorbehalten. Haben meldet das Fahrzeug in der AVEÜR als Elektrofahrzeug. Gebucht wird auf das Konto für Kfz-Abschreibungen.
 
-In GmbH und UG bietet Haben die Staffel nicht an. Sie ist eine rein steuerliche Abschreibung: In der Handelsbilanz wird planmäßig über die Nutzungsdauer abgeschrieben (§ 253 Abs. 3 Satz 1 HGB), und seit dem BilMoG folgt die Handelsbilanz steuerlichen Wahlrechten nicht mehr (§ 5 Abs. 1 Satz 1 Halbsatz 2 EStG). Haben führt ein Buch für Handels- und Steuerbilanz ohne Überleitung; die Staffel stünde damit auch in der Handelsbilanz. Die degressive AfA bleibt in der GmbH wählbar, sie ist auch nach HGB eine planmäßige Methode.
+In GmbH und UG bietet Haben die Staffel nicht an. Sie ist eine rein steuerliche Abschreibung: In der Handelsbilanz wird planmäßig über die Nutzungsdauer abgeschrieben (§ 253 Abs. 3 Satz 1 HGB), und seit dem BilMoG folgt die Handelsbilanz steuerlichen Wahlrechten nicht mehr (§ 5 Abs. 1 Satz 1 Halbsatz 2 EStG). Für die Elektro-AfA führt Haben keinen eigenen steuerlichen Abschreibungsplan. Die degressive AfA bleibt in der GmbH wählbar, sie ist auch nach HGB eine planmäßige Methode.
+
+## Sonder-AfA nach § 7g EStG
+
+Im Einzelunternehmen kannst du für eine begünstigte Anlage mit linearer oder degressiver AfA in den Anlagendetails die Beträge je Wirtschaftsjahr eintragen. Das Anschaffungsjahr und die vier Folgejahre stehen zur Auswahl. Insgesamt sind höchstens 40 % der Anschaffungskosten möglich. Für Anschaffungen vor 2024 gelten höchstens 20 % ([§ 52 Abs. 16 Satz 6 EStG](https://www.gesetze-im-internet.de/estg/__52.html), [BMF zum Wachstumschancengesetz](https://www.bundesfinanzministerium.de/Monatsberichte/Ausgabe/2024/04/Inhalte/Kapitel-3-Analysen/3-4-wachstumschancengesetz.html)). Die Voraussetzungen nach [§ 7g EStG](https://www.gesetze-im-internet.de/estg/__7g.html) bestätigst du beim Speichern eines positiven Betrags.
+
+Haben bucht die Sonder-AfA separat und weist sie in EÜR und AVEÜR sowie im CSV-Anlagenverzeichnis aus. Für bereits gebuchte Jahre sind die Beträge gesperrt. Bei einem Abgang im Anschaffungs- oder Folgejahr lässt sich keine Sonder-AfA erfassen. Bei einer Übernahme zum 1. Januar erfasst du auch die bisher beanspruchten Jahresbeträge. Haben führt daraus den steuerlichen Plan fort. Der erfasste Übernahmebuchwert muss mit diesem Plan übereinstimmen.
+
+Nach dem fünften Jahr verteilt Haben den Restwert linear über die Restnutzungsdauer ([§ 7a Abs. 9 EStG](https://www.gesetze-im-internet.de/estg/__7a.html)).
+
+Eine degressive Anlage, deren Übernahmebuchwert bereits durch Sonder-AfA gemindert ist, lässt sich in der Erfassungsmaske derzeit nur linear übernehmen.
 
 ## Erinnerungswert
 
@@ -130,7 +142,7 @@ Solange nichts gebucht ist, lässt sich eine übernommene Anlage ändern und lö
 4832 Abschreibungen auf Kfz   6.000,00   an  0320 Pkw   6.000,00
 ```
 
-Die Buchungen sind wie alle anderen sofort festgeschrieben. Danach sind die Berechnungsgrundlagen der Anlage gesperrt (Art, Abschreibung, Datum, Kosten, Nutzungsdauer, degressiver Satz, Erinnerungswert, Übernahmewerte), auch in der Datenbank per Trigger. Bezeichnung und Notiz bleiben änderbar, bei degressiver AfA auch der Wechsel zur linearen für ein noch nicht gebuchtes Jahr.
+Die Buchungen sind wie alle anderen sofort festgeschrieben. Danach sind die Berechnungsgrundlagen der Anlage gesperrt (Art, Abschreibung, Datum, Kosten, Nutzungsdauer, degressiver Satz, Erinnerungswert, Übernahmewerte), auch in der Datenbank per Trigger. Bezeichnung und Notiz bleiben änderbar, ebenso für noch nicht gebuchte Jahre die Sonder-AfA, ein Abgang und bei degressiver AfA der Wechsel zur linearen.
 
 ## Abgang
 
@@ -169,6 +181,8 @@ Die Pauschale fällt in jedem Monat ab der Anschaffung bzw. dem Übernahmesticht
 
 **Umsatzsteuer:** Die Privatnutzung ist eine unentgeltliche Wertabgabe. Bemessung ist 1 % des vollen Listenpreises abzüglich 20 % für Kosten ohne Vorsteuer, auch bei Elektroautos; die Ermäßigung gilt nur für die Einkommensteuer. Im Beispiel 471,20 € Bemessung und 89,53 € Umsatzsteuer im Monat. Sie steht in der [Voranmeldung](umsatzsteuer.md) unter Kz 81 als „Privatnutzung“, auch bei Ist-Versteuerung im Monat der Nutzung.
 
+Als Kleinunternehmer meldet Haben die Privatnutzung nicht, weder in Kz 48 der Voranmeldung noch im [Gesamtumsatz nach § 19 UStG](auswertungen.md#gesamtumsatz-nach--19-ustg), auch wenn du den Wagen vor dem Wechsel mit Vorsteuer gekauft hast. Steuerbar ist sie dann weiter ([§ 3 Abs. 9a Nr. 1 UStG](https://www.gesetze-im-internet.de/ustg_1980/__3.html)) und zählt zum Gesamtumsatz ([§ 19 Abs. 2 UStG](https://www.gesetze-im-internet.de/ustg_1980/__19.html), UStAE 19.2 Abs. 2 Satz 2). Die 0,8 % des Listenpreises unterstellen aber, dass die laufenden Kosten bis auf einen Abschlag von 20 % mit Vorsteuer belastet sind (UStAE 15.23 Abs. 5 Satz 4 Nr. 1 Buchst. a Satz 3). Als Kleinunternehmer ziehst du keine Vorsteuer mehr: Der Wert wäre zu hoch und verzerrte den Gesamtumsatz für die Grenzen von 25.000 € und 100.000 €. Betrifft dich das, ermittelst du den Wert selbst, etwa mit deiner Steuerberatung. Gibst du eine Voranmeldung ab, trägst du ihn dort unter [Werte von Hand ändern](umsatzsteuer.md#werte-von-hand-ändern) in Kz 48 ein; im Gesamtumsatz lässt er sich nicht ergänzen.
+
 **EÜR:** Die Entnahme steht als „Private Kfz-Nutzung“ in den Einnahmen, die Umsatzsteuer darauf als „Umsatzsteuer auf unentgeltliche Wertabgaben“.
 
 **Buchung:** Mit **AfA … buchen** zum Jahresende bucht Haben je Monat zum Monatsende:
@@ -184,14 +198,14 @@ Ist schon gebucht, lässt sich die Privatnutzung nicht mehr ändern.
 
 ## In der EÜR
 
-Die [EÜR](auswertungen.md) bekommt je nach Bedarf die Zeilen **AfA auf bewegliche Wirtschaftsgüter**, **Sofortabschreibung geringwertiger Wirtschaftsgüter**, **Auflösung Sammelposten** und **Restbuchwert ausgeschiedener Anlagegüter**. Solange die AfA des Jahres nicht gebucht ist, kommen die Werte aus dem Abschreibungsplan. Danach kommen sie aus dem Journal ([EÜR nach Zufluss und Abfluss](auswertungen.md#eür-nach-zufluss-und-abfluss)); der [Abgleich](buchhaltung.md#abgleich-im-journal) prüft, dass gebuchte AfA und Plan übereinstimmen.
+Die [EÜR](auswertungen.md) bekommt je nach Bedarf die Zeilen **AfA auf bewegliche Wirtschaftsgüter**, **Sonderabschreibungen nach § 7g EStG**, **Sofortabschreibung geringwertiger Wirtschaftsgüter**, **Auflösung Sammelposten** und **Restbuchwert ausgeschiedener Anlagegüter**. Solange die AfA des Jahres nicht gebucht ist, kommen die Werte aus dem Abschreibungsplan. Danach kommen sie aus dem Journal ([EÜR nach Zufluss und Abfluss](auswertungen.md#eür-nach-zufluss-und-abfluss)); der [Abgleich](buchhaltung.md#abgleich-im-journal) prüft, dass gebuchte AfA und Plan übereinstimmen.
 
-Im Jahresexport liegt `anlagen/anlagenverzeichnis.csv` mit Buchwert am Jahresanfang, Zugang, AfA, Abgang und Buchwert am Jahresende je Anlage.
+Im Jahresexport liegt `anlagen/anlagenverzeichnis.csv` mit Buchwert am Jahresanfang, Zugang, AfA, Sonder-AfA, Abgang und Buchwert am Jahresende je Anlage.
 
 ## Grenzen
 
 - Nur bewegliche Wirtschaftsgüter, keine Gebäude und keine immateriellen Wirtschaftsgüter außer Software.
-- Lineare und degressive AfA, die Staffel für Elektrofahrzeuge, GWG und Sammelposten. Keine Sonderabschreibung (§ 7g EStG), kein Investitionsabzugsbetrag, keine Leistungs-AfA und keine Absetzung für außergewöhnliche Abnutzung.
+- Lineare und degressive AfA, die Staffel für Elektrofahrzeuge, GWG und Sammelposten. Kein Investitionsabzugsbetrag, keine Leistungs-AfA und keine Absetzung für außergewöhnliche Abnutzung.
 - Degressive AfA nur für Anschaffungen ab 2020 in den oben genannten Zeiträumen; ältere degressive Anlagen übernimmst du linear mit Restbuchwert.
 - Private Kfz-Nutzung nur nach der Listenpreismethode: kein Fahrtenbuch, keine Fahrten zwischen Wohnung und Betriebsstätte (0,03 %) und keine Kostendeckelung.
 - Gebuchte AfA lässt sich nicht stornieren.

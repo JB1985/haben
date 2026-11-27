@@ -1,4 +1,4 @@
-import { formatEuro, periodKey, periodLabel } from "@haben/core";
+import { formatEuro, lastMonthOfPeriod, periodKey, periodLabel } from "@haben/core";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { daysUntil, formatDate, formatDateTime, formatLongDate } from "../../lib/format.ts";
 import { InvoiceStatus } from "../../components/InvoiceStatus.tsx";
@@ -10,6 +10,7 @@ import { getBackupStatus } from "../../server/functions/backup.ts";
 import { getInvoiceSummary } from "../../server/functions/invoices.ts";
 import { getOverview } from "../../server/functions/vat.ts";
 import { einrichtungsAufgaben } from "../../lib/einrichtung.ts";
+import { useBereichAktiv } from "../../lib/use-bereich.ts";
 
 export const Route = createFileRoute("/_app/")({
   loader: async () => {
@@ -45,13 +46,39 @@ function ustIdAufgaben(ungueltig: { contactId: string; kontakt: string; nummer: 
   }));
 }
 
+/** Stand der Voranmeldung des Zeitraums und des Steuerkontos für die Übersicht */
+function voranmeldungStand(data: UebersichtDaten) {
+  const sent = data.current?.status === "sent";
+  const vatRequired = !data.kleinunternehmer && !data.exempt;
+  // Vor dem ersten Buchungsmonat ist nichts fällig (wie bei den Fristen); ein gespeicherter Entwurf zeigt, dass es dennoch bearbeitet wird
+  const vorStart = data.current === null && periodKey(lastMonthOfPeriod(data.period)) < data.ersterBuchungsmonat;
+  // Steuerkonto: reicht der Stand für die Zahllast, die das Finanzamt per Lastschrift einzieht?
+  const zahllast = data.current?.status === "sent" ? data.current.kz83 : vorStart ? 0 : data.computedKz83;
+  const taxAccount = data.invoices.bank.find((a) => a.purpose === "steuer");
+  // Abgegebene Voranmeldungen: was je Posten noch offen ist; der Zeitraum ohne Abgabe nach den Buchungen, abzüglich
+  // schon eingezogener Lastschriften ohne Bezug (dann ist der Kontostand bereits um sie gesunken)
+  const periodOpen = data.vatOpen.filter((p) => p.year === data.period.year && p.month === data.period.month).reduce((sum, p) => sum + p.offen, 0);
+  // Bestehende Anmeldungen und ihre offenen Beträge bleiben auch ohne reguläre Abgabepflicht erreichbar.
+  const showVatPeriod = data.current !== null || periodOpen !== 0 || (!vorStart && (vatRequired || data.computedKz83 !== 0));
+  const postenOffen = data.vatOpen.filter((p) => p.offen > 0).reduce((sum, p) => sum + p.offen, 0);
+  const zahllastOffen = postenOffen + (sent || vorStart ? 0 : Math.max(0, data.computedKz83 - data.vatPaid));
+  const taxShortfall = taxAccount && taxAccount.balance !== null && zahllastOffen > 0 ? zahllastOffen - taxAccount.balance : 0;
+  return { sent, vatRequired, vorStart, zahllast, periodOpen, showVatPeriod, zahllastOffen, taxAccount, taxShortfall };
+}
+
 /** Umsatzsteuer: die Voranmeldung des Zeitraums, unbezahlte Voranmeldungen und ein zu knappes Steuerkonto */
 function umsatzsteuerAufgaben(
   data: UebersichtDaten,
-  { sent, vatRequired, taxAccount, taxShortfall }: { sent: boolean; vatRequired: boolean; taxAccount: Konto | undefined; taxShortfall: number },
+  {
+    sent,
+    vatRequired,
+    vorStart,
+    taxAccount,
+    taxShortfall,
+  }: { sent: boolean; vatRequired: boolean; vorStart: boolean; taxAccount: Konto | undefined; taxShortfall: number },
 ): Todo[] {
   const todos: Todo[] = [];
-  if (!sent && vatRequired) {
+  if (!sent && vatRequired && !vorStart) {
     todos.push({
       title: `Voranmeldung ${periodLabel(data.period)} senden`,
       detail: `Fällig ${formatLongDate(data.dueDate)}`,
@@ -75,9 +102,12 @@ function umsatzsteuerAufgaben(
   if (taxAccount && taxShortfall > 0 && vatRequired) {
     todos.push({
       title: `Steuerkonto ${taxAccount.name} deckt die Zahllast nicht`,
-      detail: `Es fehlen ${formatEuro(taxShortfall)} für ${periodLabel(data.period)}, fällig ${formatLongDate(data.dueDate)}`,
+      // Vor dem Start enthält der Fehlbetrag nur offene Voranmeldungen früherer Zeiträume, nicht den der Seite
+      detail: vorStart
+        ? `Es fehlen ${formatEuro(taxShortfall)} für offene Voranmeldungen`
+        : `Es fehlen ${formatEuro(taxShortfall)} für ${periodLabel(data.period)}, fällig ${formatLongDate(data.dueDate)}`,
       // Platzt die Lastschrift, gilt die Steuer nicht als am Fälligkeitstag entrichtet (§ 224 Abs. 2 Nr. 3 AO): Säumniszuschläge (§ 240 AO)
-      frist: data.dueDate,
+      frist: vorStart ? undefined : data.dueDate,
       action: "Zur Bank",
       tone: "warn",
       to: "/bank",
@@ -189,29 +219,19 @@ function einstellungsAufgaben(data: UebersichtDaten, backup: Awaited<ReturnType<
 function OverviewPage() {
   const data = Route.useLoaderData();
   const key = periodKey(data.period);
-  const sent = data.current?.status === "sent";
-  const vatRequired = !data.kleinunternehmer && !data.exempt;
+  const { sent, vatRequired, vorStart, zahllast, periodOpen, showVatPeriod, zahllastOffen, taxAccount, taxShortfall } = voranmeldungStand(data);
 
+  const schreiben = useBereichAktiv("rechnungserstellung");
+  const mahnwesen = useBereichAktiv("mahnwesen");
   const todos: Todo[] = [...einrichtungsAufgaben(Route.useRouteContext().einrichtung), ...ustIdAufgaben(data.ustIdUngueltig)];
-  // Steuerkonto: reicht der Stand für die Zahllast, die das Finanzamt per Lastschrift einzieht?
-  const zahllast = data.current?.status === "sent" ? data.current.kz83 : data.computedKz83;
-  const taxAccount = data.invoices.bank.find((a) => a.purpose === "steuer");
-  // Abgegebene Voranmeldungen: was je Posten noch offen ist; der Zeitraum ohne Abgabe nach den Buchungen, abzüglich
-  // schon eingezogener Lastschriften ohne Bezug (dann ist der Kontostand bereits um sie gesunken)
-  const periodOpen = data.vatOpen.filter((p) => p.year === data.period.year && p.month === data.period.month).reduce((sum, p) => sum + p.offen, 0);
-  // Bestehende Anmeldungen und ihre offenen Beträge bleiben auch ohne reguläre Abgabepflicht erreichbar.
-  const showVatPeriod = vatRequired || data.current !== null || periodOpen !== 0 || data.computedKz83 !== 0;
-  const postenOffen = data.vatOpen.filter((p) => p.offen > 0).reduce((sum, p) => sum + p.offen, 0);
-  const zahllastOffen = postenOffen + (sent ? 0 : Math.max(0, data.computedKz83 - data.vatPaid));
-  const taxShortfall = taxAccount && taxAccount.balance !== null && zahllastOffen > 0 ? zahllastOffen - taxAccount.balance : 0;
-  todos.push(...umsatzsteuerAufgaben(data, { sent, vatRequired, taxAccount, taxShortfall }), ...bankAufgaben(data));
+  todos.push(...umsatzsteuerAufgaben(data, { sent, vatRequired, vorStart, taxAccount, taxShortfall }), ...bankAufgaben(data));
   if (data.invoices.overdueCount > 0) {
     todos.push({
       title: `${data.invoices.overdueCount} ${data.invoices.overdueCount === 1 ? "Rechnung" : "Rechnungen"} überfällig`,
       detail: "Zahlungseingang prüfen oder erinnern",
-      action: "Mahnen",
+      action: mahnwesen ? "Mahnen" : "Ansehen",
       tone: "warn",
-      to: "/rechnungen/mahnwesen",
+      to: mahnwesen ? "/rechnungen/mahnwesen" : "/rechnungen",
     });
   }
   for (const appeal of data.appeals) {
@@ -224,6 +244,7 @@ function OverviewPage() {
       action: "Ansehen",
       tone: days <= 7 ? "warn" : "info",
       to: "/finanzamt",
+      erledigen: { id: appeal.id },
     });
   }
   for (const afa of data.afaPending) {
@@ -262,11 +283,14 @@ function OverviewPage() {
           {showVatPeriod && !voranmeldungOffen && (
             <Link to="/umsatzsteuer/$zeitraum" params={{ zeitraum: key }} className="btn btn-ghost">
               Voranmeldung {periodLabel(data.period)}
+              {sent && " · abgegeben"}
             </Link>
           )}
-          <Link to="/rechnungen/neu" className="btn btn-primary">
-            Neue Rechnung
-          </Link>
+          {schreiben && (
+            <Link to="/rechnungen/neu" className="btn btn-primary">
+              Neue Rechnung
+            </Link>
+          )}
         </div>
       </div>
 
@@ -276,7 +300,7 @@ function OverviewPage() {
 
       <UebersichtAufgaben geordnet={geordnet} zeitraum={key} />
 
-      {!ohneKennzahlen(data) && (
+      {!ohneKennzahlen(data, vorStart) && (
         <UebersichtKennzahlen
           data={data}
           showVatPeriod={showVatPeriod}
@@ -317,38 +341,48 @@ function OverviewPage() {
             </p>
           </section>
         )}
-        <section className="card" aria-labelledby="invoices-heading">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <h2 id="invoices-heading">Letzte Rechnungen</h2>
-            <Link to="/rechnungen" className="small">
-              Alle anzeigen
-            </Link>
-          </div>
-          {data.invoices.recent.length === 0 ? (
-            <>
-              <p className="muted" style={{ margin: 0 }}>
-                Noch keine festgeschriebene Rechnung.
-              </p>
-              <Link to="/rechnungen/neu" className="btn" style={{ alignSelf: "flex-start" }}>
-                Erste Rechnung schreiben
-              </Link>
-            </>
-          ) : (
-            <div className="table">
-              {data.invoices.recent.map((invoice) => (
-                <Link key={invoice.id} to="/rechnungen/$id" params={{ id: invoice.id }} className="table-row invoice-cols-compact">
-                  <div className="mono small">{invoice.number}</div>
-                  <div title={invoice.customer}>{invoice.customer}</div>
-                  <div className="num">{formatEuro(invoice.gross)}</div>
-                  <div>
-                    <InvoiceStatus invoice={invoice} />
-                  </div>
-                </Link>
-              ))}
-            </div>
-          )}
-        </section>
+        <LetzteRechnungen recent={data.invoices.recent} schreiben={schreiben} />
       </div>
     </>
+  );
+}
+
+type Rechnungen = Awaited<ReturnType<typeof getInvoiceSummary>>["recent"];
+
+function LetzteRechnungen({ recent, schreiben }: { recent: Rechnungen; schreiben: boolean }) {
+  return (
+    <section className="card" aria-labelledby="invoices-heading">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h2 id="invoices-heading">Letzte Rechnungen</h2>
+        <Link to="/rechnungen" className="small">
+          Alle anzeigen
+        </Link>
+      </div>
+      {recent.length === 0 ? (
+        <>
+          <p className="muted" style={{ margin: 0 }}>
+            Noch keine festgeschriebene Rechnung.
+          </p>
+          {schreiben && (
+            <Link to="/rechnungen/neu" className="btn" style={{ alignSelf: "flex-start" }}>
+              Erste Rechnung schreiben
+            </Link>
+          )}
+        </>
+      ) : (
+        <div className="table">
+          {recent.map((invoice) => (
+            <Link key={invoice.id} to="/rechnungen/$id" params={{ id: invoice.id }} className="table-row invoice-cols-compact">
+              <div className="mono small">{invoice.number}</div>
+              <div title={invoice.customer}>{invoice.customer}</div>
+              <div className="num">{formatEuro(invoice.gross)}</div>
+              <div>
+                <InvoiceStatus invoice={invoice} />
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }

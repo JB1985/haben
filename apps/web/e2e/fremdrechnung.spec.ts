@@ -2,7 +2,9 @@ import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
+import { buildEInvoice } from "@haben/einvoice";
 import postgres from "postgres";
+import { sampleDocument } from "../../../packages/einvoice/src/samples.ts";
 import { day } from "./daten.ts";
 import { axeVerstoesse, CUSTOMERS, durchlaufSeite, einrichten, gehe, INVOICES, kontaktAnlegen, kundeWaehlen, rechnungFestschreiben } from "./einrichtung.ts";
 import { databaseUrlFuer } from "./durchlaeufe.ts";
@@ -126,12 +128,31 @@ test("Steuerbehandlung: nur, was die Übernahme annimmt; die Befreiungsvorschrif
   await expect(behandlung.locator("option[value=kleinunternehmer]")).toHaveCount(0);
   await expect(behandlung.locator("option[value=steuerfrei]")).toHaveCount(1);
   await expect(vorschrift).toHaveCount(0);
+  // Regulär zwei Sätze; beim Wechsel ohne deutsche Umsatzsteuer rechnet Haben die Nettobeträge zusammen (#1880)
+  await page.getByLabel("Netto 1 (€)").fill("1.000,00");
+  await page.getByLabel("Steuer 1 (€)").fill("190,00");
+  await page.getByRole("button", { name: "Weiteren Steuersatz" }).click();
+  await page.getByLabel("Steuersatz 2").selectOption("700");
+  await page.getByLabel("Netto 2 (€)").fill("500,00");
+  await page.getByLabel("Steuer 2 (€)").fill("35,00");
   await behandlung.selectOption("steuerfrei");
   await expect(vorschrift).toHaveJSProperty("required", true);
   // Die Vorschrift steht im Hinweis unter der Auswahl, nicht im Namen
   await expect(behandlung).toHaveAccessibleDescription(/Steuerbefreiung nach § 4 UStG/);
+  // Ohne deutsche Umsatzsteuer gilt 0 %: nur der Nettobetrag, zusammengefasst aus den Zeilen (#1880)
+  await expect(page.getByLabel("Steuersatz 1")).toHaveCount(0);
+  await expect(page.getByLabel("Steuer 1 (€)")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Weiteren Steuersatz" })).toHaveCount(0);
+  await expect(page.getByLabel("Netto (€)")).toHaveValue("1.500,00");
   await behandlung.selectOption("ig_lieferung");
   await expect(behandlung).toHaveAccessibleDescription(/§ 4 Nr\. 1 Buchst\. b, § 6a UStG/);
+  await expect(page.getByLabel("Netto (€)")).toHaveValue("1.500,00");
+  // Zurück auf regulär: eine Zeile zu 0 % ohne Steuer, wie im Rechnungseditor
+  await behandlung.selectOption("regulaer");
+  await expect(page.getByLabel("Steuersatz 1")).toHaveValue("0");
+  await expect(page.getByLabel("Netto 1 (€)")).toHaveValue("1.500,00");
+  await expect(page.getByLabel("Steuer 1 (€)")).toHaveValue("0,00");
+  await expect(page.getByLabel("Steuersatz 2")).toHaveCount(0);
 });
 
 test("Auslandsleistung: Leistungsort wie im Rechnungseditor, bei der sonstigen EU-Leistung Pflicht, nie aus der Kundenanschrift vorbelegt (#1392)", async () => {
@@ -169,13 +190,45 @@ test("Ein negativer Betrag wird schon im Formular abgefangen", async () => {
   await expect(page).toHaveURL(/\/rechnungen$/);
 });
 
+test("Storno aus dem Fremdsystem: E-Rechnung mit Bezug (BT-25) auf eine übernommene Rechnung (#1900)", async () => {
+  // Rechnung und Storno als ZUGFeRD aus einem anderen Programm; das Storno nennt die Rechnung als vorausgegangene
+  const leistung = { issueDate: day(-20), dueDate: day(-6), serviceFrom: day(-20), serviceTo: day(-20) };
+  const rechnung = { ...sampleDocument({ number: "SHOP-R1" }), ...leistung };
+  const storno = {
+    ...sampleDocument({ kind: "storno", number: "SHOP-S1" }),
+    ...leistung,
+    issueDate: day(-5),
+    corrects: { number: "SHOP-R1", issueDate: day(-20) },
+  };
+  const rechnungPdf = Buffer.from((await buildEInvoice(rechnung)).pdf);
+  const stornoPdf = Buffer.from((await buildEInvoice(storno)).pdf);
+
+  await formularOeffnen(page);
+  await datei(page, "SHOP-R1.pdf", rechnungPdf);
+  await kundeWaehlen(page, KUNDE);
+  await page.getByRole("button", { name: "Übernehmen" }).click();
+  await page.waitForURL(/rechnungen\/[0-9a-f-]{36}$/);
+
+  await formularOeffnen(page);
+  await page.locator("input[type=file]").setInputFiles({ name: "SHOP-S1.pdf", mimeType: "application/pdf", buffer: stornoPdf });
+  const form = page.getByRole("form", { name: "Storno aus dem Fremdsystem" });
+  await expect(form.getByRole("status").filter({ hasText: "Die Datei storniert" })).toContainText("Die Datei storniert die Rechnung SHOP-R1");
+  await expect(form).toContainText("SHOP-S1");
+  // Kein Rechnungsformular mit negativen Beträgen
+  await expect(page.getByRole("form", { name: "Angaben zur Rechnung" })).toHaveCount(0);
+  expect(await axeVerstoesse(page), "Storno aus dem Fremdsystem").toEqual([]);
+  await form.getByRole("button", { name: "Storno übernehmen" }).click();
+  await page.waitForURL(/rechnungen\/[0-9a-f-]{36}$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(/Stornorechnung\s+SHOP-S1/);
+});
+
 test("Keine Seitenfehler im ganzen Durchlauf", () => {
   expect(pageErrors).toEqual([]);
 });
 
 /** Ein PDF so ablegen, wie es der Abruf aus dem Ausgangsordner des Postfachs tut: Datei unter ihrem Hash und eine Zeile als wartend */
-async function imPostfachAblegen(sql: postgres.Sql, nummer: string): Promise<void> {
-  const pdf = await fremdesPdf(page, nummer);
+async function imPostfachAblegen(sql: postgres.Sql, nummer: string, vorhanden?: Buffer): Promise<void> {
+  const pdf = vorhanden ?? (await fremdesPdf(page, nummer));
   const sha256 = createHash("sha256").update(pdf).digest("hex");
   const verzeichnis = join(`${process.env.E2E_DOCUMENTS_DIR ?? "test-results/e2e-belege"}-fremdrechnung`, sha256.slice(0, 2));
   await mkdir(verzeichnis, { recursive: true });
@@ -222,6 +275,39 @@ test("Aus dem Postfach: eine wartende Ausgangsrechnung verwerfen, eine übernehm
       { filename: "Rechnung-PG-2.pdf", status: "uebernommen", rechnung: true },
       { filename: "Rechnung-PG-3.pdf", status: "offen", rechnung: false },
     ]);
+  } finally {
+    await sql.end();
+  }
+});
+
+test("Aus dem Postfach: ein Storno übernehmen erledigt den Eintrag", async () => {
+  const leistung = { issueDate: day(-20), dueDate: day(-6), serviceFrom: day(-20), serviceTo: day(-20) };
+  const rechnung = { ...sampleDocument({ number: "SHOP-R2" }), ...leistung };
+  const storno = {
+    ...sampleDocument({ kind: "storno", number: "SHOP-S2" }),
+    ...leistung,
+    issueDate: day(-5),
+    corrects: { number: "SHOP-R2", issueDate: day(-20) },
+  };
+  await gehe(page, "/rechnungen");
+  await formularOeffnen(page);
+  await datei(page, "SHOP-R2.pdf", Buffer.from((await buildEInvoice(rechnung)).pdf));
+  await kundeWaehlen(page, KUNDE);
+  // Die Liste „Aus dem Postfach“ hat eigene Knöpfe „Übernehmen …“
+  await page.getByRole("button", { name: "Übernehmen", exact: true }).click();
+  await page.waitForURL(/rechnungen\/[0-9a-f-]{36}$/);
+
+  const sql = postgres(databaseUrlFuer("fremdrechnung"), { max: 1, onnotice: () => {} });
+  try {
+    await imPostfachAblegen(sql, "SHOP-S2", Buffer.from((await buildEInvoice(storno)).pdf));
+    await gehe(page, "/rechnungen");
+    await page.getByRole("region", { name: "Aus dem Postfach" }).getByRole("button", { name: "Übernehmen SHOP-S2" }).click();
+    const form = page.getByRole("form", { name: "Storno aus dem Fremdsystem" });
+    await form.getByRole("button", { name: "Storno übernehmen" }).click();
+    await expect
+      .poll(async () => (await sql`select status, invoice_id is not null as rechnung from inbox_outgoing where filename = 'Rechnung-SHOP-S2.pdf'`)[0])
+      .toEqual({ status: "uebernommen", rechnung: true });
+    expect(pageErrors).toEqual([]);
   } finally {
     await sql.end();
   }

@@ -1,9 +1,9 @@
 import { formatEuro } from "@haben/core";
-import { isInternalProvider } from "@haben/import/anbieter";
 import { Link, useRouter } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { type FormEvent, useState } from "react";
 import { formatDate } from "../lib/format.ts";
+import { type Quelle, quelleTexte, quelleZuAnbieter } from "../lib/import-quelle.ts";
 import { useAction } from "../lib/use-action.ts";
 import { resolveBankConflict } from "../server/functions/bank.ts";
 import { FormDialog } from "./FormDialog.tsx";
@@ -43,19 +43,6 @@ function Spalte({ titel, umsatz, zuordnung }: { titel: string; umsatz: Umsatz; z
   );
 }
 
-/** Wer liefert: der Bankabruf (Bank › Automatischer Abruf), der Abruf von Etsy, PayPal oder Stripe oder ein Dienst über den REST-Import */
-const QUELLEN = {
-  bank: { wer: "Die Bank", von: "von der Bank", angaben: "der Bank", abruf: "aus dem Abruf dieses Kontos" },
-  etsy: { wer: "Etsy", von: "von Etsy", angaben: "von Etsy", abruf: "aus dem Etsy-Abruf" },
-  paypal: { wer: "PayPal", von: "von PayPal", angaben: "von PayPal", abruf: "aus dem PayPal-Abruf" },
-  stripe: { wer: "Stripe", von: "von Stripe", angaben: "von Stripe", abruf: "aus dem Stripe-Abruf" },
-  extern: { wer: "Der Dienst", von: "vom Dienst", angaben: "des Dienstes", abruf: "aus dieser Quelle" },
-} as const;
-
-/** Texte zum Anbieter einer Quelle (`import_sources.provider`): Etsy, PayPal und Stripe mit eigenem Namen, übrige interne sind Bankabrufe */
-export const quelleZuAnbieter = (provider: string): keyof typeof QUELLEN =>
-  provider === "etsy" || provider === "paypal" || provider === "stripe" ? provider : isInternalProvider(provider) ? "bank" : "extern";
-
 const ENTSCHEIDUNGEN = [
   {
     value: "keep",
@@ -76,12 +63,17 @@ export function KonfliktKlaeren({
   disabled,
   quelle = "bank",
   onGeklaert,
+  label,
+  className = "btn",
 }: {
   konflikte: ImportKonfliktDaten[];
   disabled: boolean;
-  quelle?: keyof typeof QUELLEN;
+  quelle?: Quelle;
   /** Der letzte offene Konflikt ist geklärt; die Etsy-Karte behält dann die Zeile für die Bestätigung */
   onGeklaert?: () => void;
+  /** Text des Knopfs, etwa „Klären“ an der Zeile eines Kontos (#1951); sonst „Konflikt klären“ mit Zahl */
+  label?: string;
+  className?: string;
 }) {
   const router = useRouter();
   const resolve = useServerFn(resolveBankConflict);
@@ -113,7 +105,7 @@ export function KonfliktKlaeren({
     if (ok) setEntscheidung("keep");
   }
 
-  const { wer, von, angaben, abruf } = QUELLEN[quelle];
+  const { wer, von, angaben, abruf } = quelleTexte(quelle);
   const zuordnung = konflikt
     ? konflikt.previous.open === 0
       ? "Ganz zugeordnet"
@@ -124,8 +116,8 @@ export function KonfliktKlaeren({
 
   return (
     <>
-      <button type="button" className="btn" disabled={disabled || busy || !konflikt} onClick={() => setOpen(true)}>
-        {konflikte.length > 1 ? `Konflikte klären (${konflikte.length})` : "Konflikt klären"}
+      <button type="button" className={className} disabled={disabled || busy || !konflikt} onClick={() => setOpen(true)}>
+        {label ?? (konflikte.length > 1 ? `Konflikte klären (${konflikte.length})` : "Konflikt klären")}
       </button>
       <FormDialog
         open={open && konflikt !== undefined}
@@ -190,7 +182,7 @@ type Bezug = { id: string; bookingDate: string; amount: number };
 /** Hinweis in der Detailansicht: am bisherigen Umsatz die nach einem Konflikt übernommenen, am übernommenen der bisherige */
 export function KlaerungHinweis({ klaerung }: { klaerung: { provider: string; added: Bezug[]; previous: Bezug | null } | null }) {
   if (!klaerung) return null;
-  const { wer } = QUELLEN[quelleZuAnbieter(klaerung.provider)];
+  const { wer } = quelleTexte(quelleZuAnbieter(klaerung.provider));
   const verweis = (u: Bezug) => (
     <Link from="/bank" to="/bank" search={(prev) => ({ ...prev, umsatz: u.id })}>
       {formatDate(u.bookingDate)}, {betrag(u.amount)}

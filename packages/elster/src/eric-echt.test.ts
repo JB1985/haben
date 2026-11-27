@@ -8,6 +8,7 @@ import { buildEstXml, type EstAngaben, type EstArbeitnehmer, type EstXmlInput } 
 import { checkFormats, ericMeldungen } from "./formatprobe.ts";
 import { ericHomeIn } from "./install.ts";
 import { buildNachrichtXml } from "./nachricht.ts";
+import { buildVorauszahlungXml } from "./vorauszahlung.ts";
 import { EricProcessClient } from "./process-client.ts";
 import { parseWorkerCommand } from "./factory.ts";
 import { ericTestTimeout } from "../test-fixtures/eric-zeit.ts";
@@ -89,6 +90,8 @@ const alleKennzahlen: Omit<UstvaXmlInput["figures"], "kz83"> = {
   kz61: 12_800,
   // Entstandene Einfuhrumsatzsteuer (Bescheid des Zolls)
   kz62: 38_000,
+  // Minderung bei Uneinbringlichkeit, in Kz 81 enthalten (#1267)
+  kz50: 200_000,
 };
 
 // ---------------------------------------------------------------------------
@@ -125,8 +128,9 @@ const anlagen = (year: number): AveuerAnlage[] => [
     anschaffungskosten: 120_000,
     buchwertBeginn: 120_000,
     afa: 9_000,
+    sonderAfa: 20_000,
     abgang: 0,
-    buchwertEnde: 111_000,
+    buchwertEnde: 91_000,
   },
   {
     gruppe: "andere",
@@ -181,6 +185,7 @@ const anlagen = (year: number): AveuerAnlage[] => [
 ];
 /** Alle Felder der EÜR, die Haben füllt; AfA, Sammelposten und Restbuchwert passend zu den Anlagen oben */
 const alleEuerFelder: EuerFigures = {
+  sonderAfa: 20_000,
   // Zeilen 39 und 48 (#312)
   miete: 1_200_000,
   erhaltung: 30_000,
@@ -352,6 +357,14 @@ const faelle: [string, () => string][] = [
   ["UStVA 2027 einfach (ERiC 45)", ustva(2027, { kz81: 100_000, kz86: 50_000, kz66: 1_745 })],
   ["UStVA 2027 alle Kennzahlen", ustva(2027, alleKennzahlen)],
   ["UStVA 2026 einfach", ustva(2026, { kz81: 100_000, kz86: 50_000, kz66: 1_745 })],
+  [
+    "UStVA 2026 mit Mittelpunkt und Gedankenstrich im Firmennamen (#1329)",
+    ustva(
+      2026,
+      { kz81: 100_000, kz86: 50_000, kz66: 1_745 },
+      { datenlieferant: { name: "Mustermann IT · Max Mustermann", strasse: "Haupt–straße 1", plz: "10115", ort: "Berlin" } },
+    ),
+  ],
   ["UStVA 2025 einfach", ustva(2025, { kz81: 100_000, kz86: 50_000, kz66: 1_745 })],
   ["UStVA 2026 alle Kennzahlen", ustva(2026, alleKennzahlen)],
   ["UStVA 2025 alle Kennzahlen", ustva(2025, alleKennzahlen)],
@@ -362,6 +375,7 @@ const faelle: [string, () => string][] = [
   ],
   ["UStVA Erstattung", ustva(2026, { kz81: 0, kz86: 0, kz66: 1_200 })],
   ["UStVA Einfuhrumsatzsteuer", ustva(2026, { kz81: 100_000, kz86: 0, kz66: 1_900, kz62: 38_000 })],
+  ["UStVA Forderungsausfall (Kz 50, #1267)", ustva(2026, { kz81: -100_000, kz86: -50_000, kz66: 0, kz50: 150_000 })],
   ["UStVA Nullmeldung", ustva(2026, { kz81: 0, kz86: 0, kz66: 0 })],
   ["UStVA berichtigt", ustva(2026, { kz81: 100_000, kz86: 0, kz66: 1_745 }, { berichtigt: true })],
   ["UStVA Dezember", ustva(2026, { kz81: 100_000, kz86: 0, kz66: 0 }, { period: { year: 2026, month: 12 } })],
@@ -420,6 +434,25 @@ const faelle: [string, () => string][] = [
           ...envelope(year),
           versteuerung: "ist",
           figures: { base19: 0, tax19: 0, base7: 1_000_000, tax7: 70_000, vorsteuer: 0, vorauszahlungen: 70_000 },
+        }),
+    ],
+    [
+      // Forderungsausfall bei Soll (#1809): Kz 650 zusätzlich zu den geminderten Umsätzen; und Rechnung und Ausfall im selben Jahr
+      `USt-Erklärung ${year} Forderungsausfall (Kz 650)`,
+      () =>
+        buildUstErklaerungXml({
+          ...envelope(year),
+          versteuerung: "soll",
+          figures: { base19: 100_000, tax19: 19_000, base7: 50_000, tax7: 3_500, vorsteuer: 0, vorauszahlungen: 22_500, kz50: 150_000 },
+        }),
+    ],
+    [
+      `USt-Erklärung ${year} Forderungsausfall, Umsätze heben sich auf`,
+      () =>
+        buildUstErklaerungXml({
+          ...envelope(year),
+          versteuerung: "soll",
+          figures: { base19: 0, tax19: 0, base7: 0, tax7: 0, vorsteuer: 0, vorauszahlungen: 0, kz50: 150_000 },
         }),
     ],
     [
@@ -591,6 +624,21 @@ const faelle: [string, () => string][] = [
     "ESt 2025 nur Kapitalerträge ohne Steuerabzug",
     est(2025, { angaben: { ...leereAngaben, kap: { ertraegeOhneSteuerabzugInland: 30_000, ertraegeAusland: 20_000 } } }),
   ],
+  [
+    // Regel 100240078: Haben schreibt 0 zum fehlenden Zuschuss, bei Person A (privat, nur 24 c) in 24 b, bei Person B
+    // (gesetzlich, nur 24 a) in 24 c
+    "ESt 2025 Arbeitgeberzuschuss nur zur Pflege- bzw. nur zur Krankenversicherung",
+    est(2025, {
+      angaben: {
+        ...alleAngaben(2025),
+        vorsorge: {
+          a: { pkv: 600_000, ppv: 40_049, agZuschussPv: 12_000 },
+          b: { gkv: 300_000, gpv: 60_000, agZuschussGkv: 84_000 },
+          sonstige: 25_000,
+        },
+      },
+    }),
+  ],
   ["ESt 2025 ohne weitere Angaben", est(2025, { angaben: leereAngaben, telefon: undefined })],
   [
     "ESt 2025 Einkommensersatzleistungen mit Cent (Summe der gerundeten Einzelbeträge)",
@@ -661,6 +709,54 @@ const faelle: [string, () => string][] = [
         absender: { ...absender, strasse: "Am Ring 12-14" },
         betreff: "Test",
         text: "x".repeat(1000),
+        herstellerId,
+        produktVersion: "0.1.0",
+        test: true,
+      }),
+  ],
+  [
+    "Sonstige Nachricht mit Gedankenstrich, Mittelpunkt und Anführungszeichen",
+    () =>
+      buildNachrichtXml({
+        steuernummer13: stnr,
+        bundesland: "BW",
+        absender: { ...absender, name: "Muster IT · Max Muster" },
+        betreff: "Antrag „Vorauszahlungen“",
+        text: "Gewinn 01.01.2026–30.06.2026 … rund 5.000\u00a0€",
+        herstellerId,
+        produktVersion: "0.1.0",
+        test: true,
+      }),
+  ],
+  [
+    "Antrag auf Anpassung der Vorauszahlungen (AnpassungVorauszahlung 22)",
+    () =>
+      buildVorauszahlungXml({
+        steuernummer13: stnr,
+        bundesland: "BW",
+        absender: { ...absender, name: "Muster IT · Max Muster" },
+        telefon: "0711 123456",
+        quartal: "Q4",
+        jahr: new Date().getFullYear(),
+        begruendung: "Sehr geehrte Damen und Herren,\n\nGewinn 01.01.–30.06.: 5.000,00\u00a0€.",
+        heute: new Date().toISOString().slice(0, 10),
+        herstellerId,
+        produktVersion: "0.1.0",
+        test: true,
+      }),
+  ],
+  [
+    "Antrag auf Anpassung der Vorauszahlungen als natürliche Person, nachträgliche Vorauszahlung",
+    () =>
+      buildVorauszahlungXml({
+        steuernummer13: stnr,
+        bundesland: "BW",
+        absender,
+        person: { idnr: idA, vorname: "Max", name: "Muster" },
+        quartal: "nVz",
+        jahr: new Date().getFullYear() - 3,
+        begruendung: "Bitte herabsetzen.",
+        heute: new Date().toISOString().slice(0, 10),
         herstellerId,
         produktVersion: "0.1.0",
         test: true,

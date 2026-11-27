@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import AxeBuilder from "@axe-core/playwright";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, type Route, test } from "@playwright/test";
 import postgres from "postgres";
 import { serverAufrufe } from "./warten.ts";
 import { USER, YEAR } from "./daten.ts";
@@ -19,10 +19,12 @@ import {
   rechnungFestschreiben,
   trefferliste,
   randImDialog,
+  ueberSchnellsuche,
   weitereAngabenOeffnen,
 } from "./einrichtung.ts";
 import { receiptJpeg } from "./belegbild.ts";
 import { abzugEinspielen } from "./abzug.ts";
+import { eingabeNachAktion, fokusNachFehlschlag } from "./felder-sperre.ts";
 
 /**
  * Abschnitt von rechnungen (#1742) mit eigenem Server und eigener Datenbank, parallel zu den anderen Abschnitten:
@@ -48,6 +50,13 @@ test.afterAll(async () => {
 });
 
 const go = (path: string) => gehe(page, path);
+
+/** Daten von außen in einer Transaktion, als Akteur „e2e“ für die Audit-Trigger */
+const alsE2e = (sql: postgres.Sql, arbeit: (tx: postgres.TransactionSql) => Promise<unknown>) =>
+  sql.begin(async (tx) => {
+    await tx`select set_config('haben.actor', 'e2e', true)`;
+    await arbeit(tx);
+  });
 
 test("Grundstücksleistung: fester Aufbewahrungshinweis, Entwurf speichern und erneut laden (#718)", async () => {
   await go("/rechnungen/neu");
@@ -88,7 +97,7 @@ test("Grundstücksleistung: fester Aufbewahrungshinweis, Entwurf speichern und e
 
 test("§ 35a EStG: Artikel mit Arbeitskosten setzt den Haken, die Vorschau nennt den Anteil, Ausschalten nimmt das Kennzeichen (#712)", async () => {
   await go("/artikel");
-  await page.getByRole("button", { name: "Neuer Artikel" }).click();
+  await page.locator(".page-head").getByRole("button", { name: "Neuer Artikel" }).click();
   const form = page.getByRole("form", { name: "Neuer Artikel" });
   await form.getByLabel("Bezeichnung").fill("Montage Rauchwarnmelder");
   await form.getByLabel("Preis (€)").fill("8,00");
@@ -131,6 +140,58 @@ test("§ 35a EStG: Artikel mit Arbeitskosten setzt den Haken, die Vorschau nennt
   await page.getByRole("button", { name: "Entwurf löschen", exact: true }).click();
   await bestaetigen(page, "Entwurf löschen");
   await expect(page).toHaveURL(/\/rechnungen(?:\?.*)?$/);
+});
+
+test("Rechnungskopf: Hinweise zu Leistungszeitraum, Format, Fremdwährung und Festschreiben (#1253)", async () => {
+  await go("/rechnungen/neu");
+  for (const feld of ["Leistung von", "Leistung bis"]) {
+    await expect(page.getByLabel(feld, { exact: true })).toHaveAccessibleDescription(
+      /^Tag oder Zeitraum der Leistung\. Beide leer: Auf der Rechnung steht das Rechnungsdatum; eine Zahlung vor der Leistung erkennt Haben dann nicht als Vorauszahlung\. Eingetragen, auch am Rechnungsdatum: Die Steuer auf eine Zahlung vor der Leistung entsteht im Voranmeldungszeitraum der Zahlung\. Vorauszahlung auf normale Rechnungen$/,
+    );
+  }
+  await expect(page.getByLabel("E-Rechnungsformat", { exact: true })).toHaveAccessibleDescription(
+    /^ZUGFeRD passt für die meisten Kunden\. XRechnung nur, wenn der Kunde sie verlangt.*Leitweg-ID/,
+  );
+  const festschreiben = page.getByRole("button", { name: "Festschreiben", exact: true }).first();
+  await expect(festschreiben).toHaveAccessibleDescription(/Nach dem Festschreiben bekommt die Rechnung ihre endgültige Nummer und ist nicht mehr änderbar/);
+  await expect(festschreiben).toHaveAttribute("title", "Danach nicht mehr änderbar, Haben vergibt die Nummer");
+  await expect(page.getByText("Gebucht wird in Euro")).toHaveCount(0);
+  await page.getByLabel("Währung", { exact: true }).fill("USD");
+  await expect(page.getByLabel("Währung", { exact: true })).toHaveAccessibleDescription(
+    /^Beträge in USD, die Umsatzsteuer zusätzlich in Euro\. Gebucht wird in Euro; leerer Kurs = Umsatzsteuer-Umrechnungskurs des Leistungsmonats, sobald veröffentlicht\. Kein GiroCode.*Mahnung aus Haben\. Rechnungen in Fremdwährung$/,
+  );
+  await expect(page.getByRole("link", { name: "Rechnungen in Fremdwährung" })).toHaveAttribute("href", /\/rechnungen\.html#rechnungen-in-fremdw/);
+  // Das Vorauszahlungsverfahren gibt es nur für Euro; in Fremdwährung gilt der allgemeine Hinweis
+  await expect(page.getByLabel("Leistung von", { exact: true })).toHaveAccessibleDescription(
+    /^Tag oder Zeitraum der Leistung, wenn er vom Rechnungsdatum abweicht\. Beide leer: Auf der Rechnung steht das Rechnungsdatum\.$/,
+  );
+});
+
+test("Angebot: Hinweis zum Leistungszeitraum nennt kein Rechnungsdatum (#1253)", async () => {
+  await go("/angebote/neu");
+  const hinweis = await page.getByLabel("Leistung von", { exact: true }).evaluate((el) => el.getAttribute("aria-describedby"));
+  expect(hinweis).not.toBeNull();
+  await expect(page.getByLabel("Leistung von", { exact: true })).not.toHaveAccessibleDescription(/Rechnungsdatum/);
+});
+
+test("Teilleistung: Hinweis an „Leistung von“ nennt die Pflicht statt „leer“ (#1253)", async () => {
+  await go("/rechnungen/neu");
+  await page.getByLabel("Rechnungsart", { exact: true }).selectOption("abschlag");
+  await page.getByRole("checkbox", { name: "Teilleistung bereits erbracht" }).check();
+  const von = page.getByLabel("Leistung von", { exact: true });
+  await expect(von).toHaveAttribute("required", "");
+  await expect(von).not.toHaveAccessibleDescription(/Beide leer/);
+});
+
+test("Teilleistung: nur „Leistung von“ ist Pflicht, „Leistung bis“ ist nicht als Pflicht beschrieben (#1253)", async () => {
+  await go("/rechnungen/neu");
+  await page.getByLabel("Rechnungsart", { exact: true }).selectOption("abschlag");
+  await page.getByRole("checkbox", { name: "Teilleistung bereits erbracht" }).check();
+  const bis = page.getByLabel("Leistung bis", { exact: true });
+  await expect(bis).not.toHaveAttribute("required");
+  await expect(bis).not.toHaveAccessibleDescription(/Pflicht/);
+  await expect(page.getByLabel("Leistung von", { exact: true })).toHaveAccessibleDescription("Tag der erbrachten Teilleistung, Pflicht.");
+  await expect(bis).toHaveAccessibleDescription(/Nur bei einem Zeitraum/);
 });
 
 test("Abschlag: Anzahlung ist Vorgabe, erbrachte Teilleistung braucht ein Leistungsdatum (#622)", async () => {
@@ -297,9 +358,16 @@ test("Unsere Lieferantennummer beim Kunden steht im Kopf der Rechnung (#711)", a
   await go("/kontakte/neu");
   await page.getByLabel("Name oder Firma").fill("Wohnbau Nord eG");
   await page.getByLabel("Ort").fill("Lübeck");
+  // Die Nummer steht in „Weitere Angaben“ (#1253): zugeklappt geht sie mit dem Speichern und steht in der Überschrift
+  const bereich = page.locator("details.weitere-angaben");
+  await weitereAngabenOeffnen(page);
   await page.getByLabel("Unsere Lieferantennummer bei diesem Kunden").fill("70815");
+  await bereich.locator("summary").click();
+  await expect(bereich).toHaveJSProperty("open", false);
   await page.getByRole("button", { name: "Kontakt anlegen" }).click();
   await expect(page.getByRole("heading", { name: "Versionen" })).toBeVisible();
+  await expect(bereich.locator("summary")).toContainText("Unsere Lieferantennummer 70815");
+  await weitereAngabenOeffnen(page);
   await expect(page.getByLabel("Unsere Lieferantennummer bei diesem Kunden")).toHaveValue("70815");
   // Die eigene Lieferantennummer (Gegenrichtung) bleibt leer
   await expect(page.getByLabel("Lieferantennummer", { exact: true })).toHaveValue("");
@@ -332,6 +400,30 @@ test("Kontakt bearbeiten: Die Meldung „Gespeichert.“ bleibt nach dem Speiche
   // Auch wenn Speichern und Neuladen ganz durch sind, nicht nur für einen Augenblick
   await speichern.fertig();
   await expect(meldung).toBeVisible();
+  // Archivieren: Die folgenden Tests rechnen nicht mit diesem Kunden
+  await page.getByRole("button", { name: "Archivieren" }).click();
+  await expect(page.getByRole("button", { name: "Wiederherstellen" })).toBeVisible();
+});
+
+test("Kontakt bearbeiten: Eingaben direkt nach dem Speichern bleiben erhalten (#1824)", async () => {
+  await go("/kontakte/neu");
+  const name = page.getByLabel("Name oder Firma");
+  await name.fill("Sperre Testkunde GmbH");
+  await page.getByRole("button", { name: "Kontakt anlegen" }).click();
+  await expect(page.getByRole("heading", { name: "Versionen" })).toBeVisible();
+
+  await name.fill("Sperre Testkunde gespeichert");
+  await eingabeNachAktion(page, {
+    aktion: page.getByRole("button", { name: "Speichern", exact: true }),
+    feld: page.getByLabel("Ort"),
+    text: "Gleich danach getippt",
+    neuGeladen: page.getByRole("heading", { name: "Sperre Testkunde gespeichert", level: 1 }),
+  });
+});
+
+test("Kontakt bearbeiten: Speichern schlägt fehl, der Fokus steht danach wieder im Feld (#1824)", async () => {
+  // Der Kontakt aus dem Test davor
+  await fokusNachFehlschlag(page, page.getByLabel("Ort"));
   // Archivieren: Die folgenden Tests rechnen nicht mit diesem Kunden
   await page.getByRole("button", { name: "Archivieren" }).click();
   await expect(page.getByRole("button", { name: "Wiederherstellen" })).toBeVisible();
@@ -444,6 +536,52 @@ test("Kunden im Rechnungsentwurf anlegen, ohne die Eingaben zu verlieren (#330)"
   await expect(page.getByRole("button", { name: "Wiederherstellen" })).toBeVisible();
 });
 
+test("Rechnungsentwurf: Kunden im Dialog anlegen speichert den Entwurf nicht mit (#1835)", async () => {
+  // Gespeichert, danach eine Änderung: Ein Absenden des Entwurfs würde wirklich speichern
+  await go("/rechnungen/neu");
+  await kundeWaehlen(page);
+  await page.getByLabel("Beschreibung Position 1").fill("Beratung");
+  await page.getByLabel("Menge Position 1").fill("1");
+  await page.getByLabel(/Einzelpreis Position 1/).fill("500");
+  const speichern = page.getByRole("button", { name: "Entwurf speichern", exact: true });
+  await speichern.click();
+  await page.waitForURL(/\/rechnungen\/[0-9a-f-]{36}$/);
+  await expect(speichern).toBeDisabled();
+  const id = page.url().split("/").pop()!;
+  await page.getByLabel("Beschreibung Position 1").fill("Beratung geändert");
+  await expect(speichern).toBeEnabled();
+
+  const sql = postgres(databaseUrlFuer(DURCHLAUF), { max: 1 });
+  try {
+    const stand = async () => (await sql`select contact_id, updated_at from invoices where id = ${id}`)[0];
+    const vorher = await stand();
+    const dialog = page.getByRole("dialog", { name: "Neuen Kunden anlegen" });
+    await neuenKontaktOeffnen(page);
+    await dialog.getByLabel("Name oder Firma").fill("Dialogkunde Süd GmbH");
+    await dialog.getByLabel("Ort").fill("Passau");
+    const aufrufe = serverAufrufe(page);
+    await dialog.getByRole("button", { name: "Kontakt anlegen" }).click();
+    await expect(dialog).toBeHidden();
+    await aufrufe.fertig();
+    // Der neue Kunde steht im Feld, die Änderung bleibt ungespeichert
+    await expect(page.getByRole("combobox", { name: "Kunde", exact: true })).toHaveValue("Dialogkunde Süd GmbH · Passau");
+    await expect(page.getByLabel("Beschreibung Position 1")).toHaveValue("Beratung geändert");
+    await expect(speichern).toBeEnabled();
+    expect(await stand()).toEqual(vorher);
+  } finally {
+    await sql.end();
+  }
+
+  // Den Entwurf löschen und den Kunden archivieren, damit die folgenden Tests mit den bisherigen Kunden rechnen
+  await page.getByRole("button", { name: "Entwurf löschen", exact: true }).click();
+  await bestaetigen(page, "Entwurf löschen");
+  await expect(page).toHaveURL(/\/rechnungen(?:\?.*)?$/);
+  await go("/kontakte");
+  await page.getByRole("link", { name: /Dialogkunde Süd GmbH/ }).click();
+  await page.getByRole("button", { name: "Archivieren" }).click();
+  await expect(page.getByRole("button", { name: "Wiederherstellen" })).toBeVisible();
+});
+
 test("Kontakt: Schnellanlage und Bearbeiten speichern auch zugeklappte Weitere Angaben, ungeänderte bleiben (#1253)", async () => {
   await go("/rechnungen/neu");
   const dialog = page.getByRole("dialog", { name: "Neuen Kunden anlegen" });
@@ -480,6 +618,93 @@ test("Kontakt: Schnellanlage und Bearbeiten speichern auch zugeklappte Weitere A
   await expect(page.getByLabel("Stufe 1: Skonto in %")).toHaveValue("2,50");
   await page.getByRole("button", { name: "Archivieren" }).click();
   await expect(page.getByRole("button", { name: "Wiederherstellen" })).toBeVisible();
+});
+
+test("Kontakt: Wechsel ohne Neuladen zu einem Kontakt mit gleicher Version zeigt dessen Angaben, offene Formulare der Karten gehen zu (#1834)", async () => {
+  const sql = postgres(databaseUrlFuer(DURCHLAUF), { max: 1 });
+  const format = (await sql<{ format: string }[]>`select quote_number_format as format from company where id = 1`)[0]!.format;
+  try {
+    // Zwei Kunden in Version 1, mit eigenem Angebotskreis, damit auch dessen Karte am Rand steht (#1426)
+    await alsE2e(sql, async (tx) => {
+      await tx`update company set quote_counter_per_customer = true, quote_number_format = 'AN-{JJJJ}-{KUNDENNR}-{NNN}' where id = 1`;
+      await tx`insert into contacts (name, ort, land, kundennummer, hourly_rate_cents, is_customer, is_supplier)
+        values ('Wechselkunde Nord', 'Kiel', 'DE', 'WN-1834', 9550, true, false), ('Wechselkunde Süd', 'München', 'DE', 'WS-1834', 12000, true, false)`;
+    });
+    await go("/kontakte");
+    await page.getByRole("link", { name: /Wechselkunde Nord/ }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "Wechselkunde Nord" })).toBeVisible();
+    await expect(page.getByLabel("Ort")).toHaveValue("Kiel");
+    // Angefangenes in den Karten: Ansprechpartner, Mandat und nächste Angebotsnummer
+    await page.getByRole("button", { name: "Ansprechpartner hinzufügen" }).click();
+    await page.getByRole("form", { name: "Neuer Ansprechpartner" }).getByLabel("Name").fill("Frau Nord");
+    await page.getByRole("button", { name: "Mandat anlegen" }).click();
+    await expect(page.getByRole("form", { name: "Neues Mandat" }).getByLabel("Kontoinhaber")).toHaveValue("Wechselkunde Nord");
+    const kreis = page.getByRole("form", { name: /^Angebotsnummern dieses Kunden/ });
+    await kreis.getByLabel("Nächste laufende Nummer").fill("7");
+    await kreis.getByRole("button", { name: "Übernehmen" }).click();
+    await expect(kreis.getByRole("status")).toContainText("Nummernkreis gespeichert.");
+
+    // Über die Schnellsuche zum anderen Kunden, ohne Neuladen: Formular und Karten gehören jetzt ihm
+    await ueberSchnellsuche(page, "Wechselkunde Süd", /Wechselkunde Süd/);
+    await expect(page.getByRole("heading", { level: 1, name: "Wechselkunde Süd" })).toBeVisible();
+    const formular = page.getByRole("form", { name: "Kontakt" });
+    await expect(formular.getByLabel("Name oder Firma")).toHaveValue("Wechselkunde Süd");
+    await expect(formular.getByLabel("Ort")).toHaveValue("München");
+    await expect(formular.getByLabel("Kundennummer")).toHaveValue("WS-1834");
+    await weitereAngabenOeffnen(page);
+    await expect(formular.getByLabel("Stundensatz (€, optional)")).toHaveValue("120,00");
+    await expect(page.getByRole("form", { name: "Neuer Ansprechpartner" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Ansprechpartner hinzufügen" })).toBeVisible();
+    await expect(page.getByRole("form", { name: "Neues Mandat" })).toHaveCount(0);
+    await expect(kreis.getByLabel("Nächste laufende Nummer")).toHaveValue("1");
+    await expect(kreis.getByRole("status")).toHaveCount(0);
+  } finally {
+    // Nicht in den Zahlen der folgenden Tests, Angebotsnummern wieder ohne Kreis je Kunde
+    await alsE2e(sql, async (tx) => {
+      await tx`update contacts set archived_at = now() where kundennummer in ('WN-1834', 'WS-1834')`;
+      await tx`update company set quote_counter_per_customer = false, quote_number_format = ${format} where id = 1`;
+    });
+    await sql.end();
+  }
+});
+
+test("Kontakt: Beim Wechsel ohne Neuladen bleiben „Gespeichert.“ und ein Fehler des vorigen Kontakts nicht stehen (#1839)", async () => {
+  const sql = postgres(databaseUrlFuer(DURCHLAUF), { max: 1 });
+  const ost = page.getByRole("heading", { level: 1, name: "Meldekunde Ost" });
+  const gespeichert = page.getByRole("form", { name: "Kontakt" }).getByRole("status").filter({ hasText: "Gespeichert." });
+  const fehler = page.getByRole("alert");
+  try {
+    await alsE2e(
+      sql,
+      (tx) => tx`insert into contacts (name, ort, land, kundennummer, is_customer, is_supplier)
+        values ('Meldekunde Ost', 'Rostock', 'DE', 'MO-1839', true, false), ('Meldekunde West', 'Aachen', 'DE', 'MW-1839', true, false)`,
+    );
+    await go("/kontakte");
+    await ueberSchnellsuche(page, "Meldekunde Ost", /Meldekunde Ost/);
+    await expect(ost).toBeVisible();
+    await page.getByRole("button", { name: "Speichern", exact: true }).click();
+    await expect(gespeichert).toBeVisible();
+
+    // Beim anderen Kontakt scheitert das Archivieren: Die Meldung steht über der Seite
+    await ueberSchnellsuche(page, "Meldekunde West", /Meldekunde West/);
+    await expect(page.getByRole("heading", { level: 1, name: "Meldekunde West" })).toBeVisible();
+    await expect(gespeichert).toHaveCount(0);
+    const abbrechen = (route: Route) => (route.request().method() === "POST" ? route.abort() : route.continue());
+    await page.route(/_serverFn/, abbrechen);
+    await page.getByRole("button", { name: "Archivieren" }).click();
+    await expect(fehler).toBeVisible();
+    await page.unroute(/_serverFn/, abbrechen);
+
+    // Zurück zum ersten: weder dessen „Gespeichert.“ von vorhin noch der Fehler des anderen
+    await ueberSchnellsuche(page, "Meldekunde Ost", /Meldekunde Ost/);
+    await expect(ost).toBeVisible();
+    await expect(fehler).toHaveCount(0);
+    await expect(gespeichert).toHaveCount(0);
+  } finally {
+    // Nicht in den Zahlen der folgenden Tests
+    await alsE2e(sql, (tx) => tx`update contacts set archived_at = now() where kundennummer in ('MO-1839', 'MW-1839')`);
+    await sql.end();
+  }
 });
 
 test("Teilleistung ohne Leistungsdatum: Entwurf speichern nennt das Feld (Review #974)", async () => {
@@ -565,6 +790,42 @@ test("Wiederkehrende Rechnung: Kunde suchen, ohne Kunde nicht speicherbar, neuen
   await page.getByRole("link", { name: /Vorlagenkunde GmbH/ }).click();
   await page.getByRole("button", { name: "Archivieren" }).click();
   await expect(page.getByRole("button", { name: "Wiederherstellen" })).toBeVisible();
+});
+
+test("Wiederkehrende Rechnung: Wechsel ohne Neuladen zu einer Vorlage mit gleichem Zeitstempel zeigt deren Angaben, die Meldung der vorigen geht (#1839)", async () => {
+  const sql = postgres(databaseUrlFuer(DURCHLAUF), { max: 1 });
+  const zeile = (description: string, unitPrice: number) => JSON.stringify([{ description, quantity: 1000, unit: "Monat", unitPrice, taxRate: 1900 }]);
+  const bezeichnung = page.getByLabel("Bezeichnung");
+  const position = page.getByLabel("Beschreibung Position 1");
+  const gespeichert = page.getByRole("status").filter({ hasText: "Gespeichert." });
+  try {
+    // Zwei pausierte Vorlagen in einer Anweisung, also mit demselben updated_at
+    await alsE2e(
+      sql,
+      (tx) => tx`insert into recurring_invoices (name, active, contact_id, lines, recurrence, anchor_day, next_date)
+        select v.name, false, c.id, v.lines::jsonb, 'P1M', 1, ${`${YEAR + 1}-01-01`}::date
+        from (values ('Wartung Wechsel Nord', ${zeile("Wartung Nord", 50000)}), ('Wartung Wechsel Süd', ${zeile("Wartung Süd", 70000)})) as v(name, lines),
+          (select id from contacts where name = 'Nordwerk Software GmbH' and archived_at is null limit 1) as c`,
+    );
+    await go("/rechnungen/wiederkehrend");
+    await ueberSchnellsuche(page, "Wartung Wechsel Nord", /Wartung Wechsel Nord/);
+    await expect(page.getByRole("heading", { level: 1, name: "Wartung Wechsel Nord" })).toBeVisible();
+    await expect(position).toHaveValue("Wartung Nord");
+    await ueberSchnellsuche(page, "Wartung Wechsel Süd", /Wartung Wechsel Süd/);
+    await expect(page.getByRole("heading", { level: 1, name: "Wartung Wechsel Süd" })).toBeVisible();
+    await expect(bezeichnung).toHaveValue("Wartung Wechsel Süd");
+    await expect(position).toHaveValue("Wartung Süd");
+
+    // Gespeichert, dann zurück: Die Meldung gehört zur anderen Vorlage
+    await page.getByRole("button", { name: "Speichern", exact: true }).click();
+    await expect(gespeichert).toBeVisible();
+    await ueberSchnellsuche(page, "Wartung Wechsel Nord", /Wartung Wechsel Nord/);
+    await expect(bezeichnung).toHaveValue("Wartung Wechsel Nord");
+    await expect(gespeichert).toHaveCount(0);
+  } finally {
+    await alsE2e(sql, (tx) => tx`delete from recurring_invoices where name like 'Wartung Wechsel %'`);
+    await sql.end();
+  }
 });
 
 test("REST-API: Token mit Rechten anlegen, Rechnungsentwurf mit Bestellnummer und Beleg über die API", async ({ browser }) => {
@@ -858,6 +1119,26 @@ test("CSV-Import: Kontakte, Artikel und Anlagen mit Vorschau, Zuordnung und Dubl
   await expect(page.getByText("Lastenrad").first()).toBeVisible();
 });
 
+test("Anlage: Wechsel ohne Neuladen zwischen den baugleichen Anlagen aus dem Import zeigt die Angaben der zweiten, die Meldung der ersten geht (#1839)", async () => {
+  // Die Lastenräder aus dem Test davor: in einer Transaktion angelegt, also mit demselben updated_at
+  const angaben = page.getByRole("region", { name: "Angaben" });
+  const notiz = angaben.getByRole("textbox", { name: "Notiz" });
+  const gespeichert = page.getByRole("status").filter({ hasText: "Gespeichert." });
+  await go("/anlagen");
+  await ueberSchnellsuche(page, "RAD-1", /Lastenrad/);
+  await expect(page.getByRole("heading", { level: 1, name: "Lastenrad" })).toBeVisible();
+  await expect(notiz).toHaveValue("RAD-1");
+  await ueberSchnellsuche(page, "RAD-2", /Lastenrad/);
+  await expect(notiz).toHaveValue("RAD-2");
+
+  // Gespeichert, dann zurück: Die Meldung gehört zur anderen Anlage
+  await angaben.getByRole("button", { name: "Speichern", exact: true }).click();
+  await expect(gespeichert).toBeVisible();
+  await ueberSchnellsuche(page, "RAD-1", /Lastenrad/);
+  await expect(notiz).toHaveValue("RAD-1");
+  await expect(gespeichert).toHaveCount(0);
+});
+
 test("CSV-Import: Debitoren und Kreditoren aus DATEV-Stammdaten, Vorschlag nur mit Bestätigung (#472)", async ({ browser }) => {
   // Kopf und Spalten wie EXTF_GP_Stamm_*.csv aus sevDesk, Zeilen erfunden; Brückenbau Süd GmbH (K-900) kam im Test davor
   const spalten = readFileSync(new URL("../../../packages/import/test-fixtures/sevdesk/buchhaltung-2.0/extf-gp-stamm.csv", import.meta.url), "utf-8")
@@ -949,6 +1230,51 @@ test("CSV-Import: Bei mehr als 200 Zeilen bleibt jeder Vorschlag aus DATEV-Stamm
   } finally {
     await sql.end();
   }
+});
+
+test("CSV-Import: Bei gleichem Namen wählt die Vorschau zuordnen, neu anlegen oder überspringen (#472)", async ({ browser }) => {
+  // Rheinpixel GmbH (Einrichtung) und Weinhaus Ahr GmbH (CSV-Import) stehen ohne Kreditor in Haben; der GP-Stamm nennt sie mit Kreditor
+  const spalten = readFileSync(new URL("../../../packages/import/test-fixtures/sevdesk/buchhaltung-2.0/extf-gp-stamm.csv", import.meta.url), "utf-8")
+    .split(/\r?\n/)[1]!
+    .split(";");
+  const zeile = (werte: Record<string, string>) => spalten.map((name) => werte[name] ?? "").join(";");
+  const gpStamm = [
+    `"EXTF";700;16;"Debitoren/Kreditoren";5;;;;;;1;1;${YEAR}0101;4;;;;;;;;;;;;;;;;;`,
+    spalten.join(";"),
+    zeile({ Konto: "70911", "Name (Adressatentyp Unternehmen)": "Rheinpixel GmbH" }),
+    zeile({ Konto: "70912", "Name (Adressatentyp Unternehmen)": "Weinhaus Ahr GmbH", Ort: "Ahrweiler" }),
+    zeile({ Konto: "70913", "Name (Adressatentyp Unternehmen)": "Nordwerk Software GmbH" }),
+  ].join("\r\n");
+  const datei = [{ name: `EXTF_GP_Stamm_${YEAR}.csv`, mimeType: "text/csv", buffer: Buffer.from(gpStamm) }];
+  await go("/csv-import?art=kontakte");
+  await page.getByLabel("CSV-Datei").setInputFiles(datei);
+  await page.getByRole("button", { name: "Vorschau" }).click();
+  const preview = page.getByRole("region", { name: "Vorschau" });
+  await expect(preview).toContainText("0 neu, 3 Vorschläge zum Bestätigen");
+  await expect(preview).toContainText("Kreditor 70911 an „Rheinpixel GmbH“ vergeben (gleicher Name)");
+  const wahl = (name: string) => preview.getByRole("group", { name: `Gleicher Name: ${name}` });
+  await expect(wahl("Rheinpixel GmbH").getByRole("radio", { name: "Überspringen" })).toBeChecked();
+  await expect(preview.getByRole("checkbox", { name: "Bestätigen" })).toHaveCount(0);
+  // Barrierefreiheit mit den Optionsfeldern in der Tabelle, in eigenem Kontext wie in den Tests davor
+  const context = await browser.newContext({ storageState: await page.context().storageState() });
+  const axePage = await context.newPage();
+  await axePage.goto(new URL("/csv-import?art=kontakte", page.url()).toString());
+  await axePage.getByLabel("CSV-Datei").setInputFiles(datei);
+  await axePage.getByRole("button", { name: "Vorschau" }).click();
+  await expect(axePage.getByRole("radio", { name: "Neu anlegen" }).first()).toBeVisible();
+  expect(await axeVerstoesse(axePage)).toEqual([]);
+  await context.close();
+  await wahl("Rheinpixel GmbH").getByRole("radio", { name: "Zuordnen" }).check();
+  await wahl("Weinhaus Ahr GmbH").getByRole("radio", { name: "Neu anlegen" }).check();
+  await preview.getByRole("button", { name: "2 Kontakte übernehmen" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "übernommen" })).toHaveText(
+    "1 Kontakt übernommen, 1 Personenkonto zugeordnet, 1 nicht bestätigter Vorschlag übersprungen.",
+  );
+  // Danach stehen beide Nummern an einem Kontakt; Nordwerk bleibt ein Vorschlag
+  await page.getByRole("button", { name: "Vorschau" }).click();
+  await expect(preview).toContainText("0 neu, 1 Vorschlag zum Bestätigen, 2 Dubletten, 0 mit Fehlern");
+  await go("/kontakte");
+  await expect(page.getByRole("region", { name: "Kontaktliste" }).getByText("Weinhaus Ahr GmbH")).toHaveCount(2);
 });
 
 test("Seiten mit den Daten dieses Abschnitts ohne axe-Verstöße", async () => {

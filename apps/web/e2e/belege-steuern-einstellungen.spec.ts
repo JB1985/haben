@@ -6,7 +6,19 @@ import { expect, type Page, test } from "@playwright/test";
 import postgres from "postgres";
 import { currentYear, YEAR } from "./daten.ts";
 import { appDatabaseUrlFuer, type Durchlauf, databaseUrlFuer, ENABLE_BANKING_PORT } from "./durchlaeufe.ts";
-import { bestaetigen, faktenZeigen, durchlaufSeite, gehe, kontrasteInThemes, neuenLieferantenOeffnen, ohneAxeVerstoesse, randImDialog } from "./einrichtung.ts";
+import {
+  axeVerstoesse,
+  bankVerbinden,
+  bestaetigen,
+  faktenZeigen,
+  kontoVerbinden,
+  durchlaufSeite,
+  gehe,
+  kontrasteInThemes,
+  neuenLieferantenOeffnen,
+  ohneAxeVerstoesse,
+  randImDialog,
+} from "./einrichtung.ts";
 import { LAPTOP } from "./kopfzeile.ts";
 import { abzugEinspielen } from "./abzug.ts";
 
@@ -106,6 +118,8 @@ test("Anlage N: Pflichtfeld im zugeklappten Block wird beim Speichern sichtbar",
   // und das Speichern bleibt ohne jede Rückmeldung stehen
   const brutto = n.getByRole("group", { name: "Lohnsteuerbescheinigung 2 · Erika" }).getByLabel("Nr. 3 Bruttoarbeitslohn", { exact: true });
   await expect(brutto).toBeFocused();
+  // Die Meldung steht am Feld (#1277)
+  await expect(brutto).toHaveAccessibleDescription("Trag den Bruttoarbeitslohn ein, etwa 42.000,00.");
 });
 
 test("Vorsorgeaufwand: Rürup, Wahlleistungen und Zuschüsse überstehen das Speichern (#943)", async () => {
@@ -213,9 +227,20 @@ test("Einkommensteuer: Kinder, Angaben des Ehegatten und ungültige Beträge bei
     await feld("kapMit").fill("350,00");
     await form.getByLabel("Günstigerprüfung beantragen").check();
     await feld("handwerker").fill("800");
-    await feld("spenden").fill("zwölf");
+    await feld("spenden").fill("12€50");
+    // Zugeklappt: Ein Fehler darin klappt den Block beim Speichern wieder auf (#1277)
+    const sonderausgaben = form.locator("details.est-block").filter({ has: page.locator(".est-block-title", { hasText: /^Sonderausgaben und Belastungen$/ }) });
+    await sonderausgaben.locator("summary").click();
+    await expect(feld("spenden")).toBeHidden();
     await form.getByRole("button", { name: "Angaben speichern" }).click();
-    await expect(form.getByRole("alert")).toContainText("Kein gültiger Betrag: Spenden, Kinderbetreuung Lena.");
+    // Je Feld die Meldung, der Fokus im ersten Feld mit Fehler, gespeichert ist nichts (#1277)
+    const meldung = "Trag den Betrag ein, etwa 1.234,56, oder lass das Feld leer.";
+    await expect(feld("spenden")).toBeFocused();
+    await expect(feld("spenden")).toHaveAccessibleDescription(`an steuerbegünstigte Empfänger im Inland ${meldung}`);
+    await expect(kind.getByLabel("Kinderbetreuungskosten (€)")).toHaveAccessibleDescription(meldung);
+    await expect(feld("handwerker")).not.toHaveAttribute("aria-invalid");
+    await expect(form.getByRole("status").filter({ hasText: "Angaben gespeichert." })).toHaveCount(0);
+    expect(await sql`select data from income_tax_inputs where year = ${YEAR - 1}`).toEqual(vorher.map(({ data }) => ({ data })));
     await feld("spenden").fill("12,00");
     await kind.getByLabel("Kinderbetreuungskosten (€)").fill("1.500,00");
     await form.getByRole("button", { name: "Angaben speichern" }).click();
@@ -463,7 +488,18 @@ test("Belege per E-Mail: Postfach einrichten, Fehler beim Abruf sichtbar", async
 
 test("Kontoabruf: Enable Banking in den Einstellungen, ein falscher Schlüssel wird abgelehnt", async () => {
   await go("/bank");
-  await page.getByRole("link", { name: "Einstellungen › Bank" }).click();
+  // Ohne Zugang zu Enable Banking steht der Weg im Dialog ausgegraut, mit Grund und Link zu den Einstellungen (#1951)
+  await kontoVerbinden(page, "Bank hinzufügen");
+  const wie = page.getByRole("dialog", { name: "Wie verbinden?" });
+  const enableBanking = wie.getByRole("radio", { name: "Online-Banking über Enable Banking (PSD2)" });
+  await expect(enableBanking).toBeDisabled();
+  await expect(enableBanking).toHaveAccessibleDescription(/Braucht einen Zugang zu Enable Banking; einrichten unter Einstellungen › Bank\.$/);
+  // Vorgewählt ist der erste Weg, der geht
+  await expect(wie.getByRole("radio", { name: "Kontoauszüge als Datei (CSV/CAMT)" })).toBeChecked();
+  expect(await axeVerstoesse(page), "Dialog „Wie verbinden?“").toEqual([]);
+  // Der Link im Grund führt zur Einrichtung
+  await wie.getByRole("link", { name: "Einstellungen › Bank" }).click();
+
   await page.waitForURL("**/einstellungen?bereich=bank");
   const card = page.getByRole("form", { name: "Automatischer Kontoabruf" });
   await expect(card.getByText("/api/bank/callback")).toBeVisible();
@@ -491,7 +527,7 @@ test("Bank verbinden: die markierte Bank ist gewählt, auch als einziger Treffer
     await expect(card.getByText("Zugang geprüft und verschlüsselt gespeichert")).toBeVisible();
 
     await go("/bank");
-    await page.getByRole("button", { name: "Bank verbinden" }).click();
+    await bankVerbinden(page, "Online-Banking über Enable Banking (PSD2)");
     const banken = page.getByRole("listbox");
     const weiter = page.getByRole("button", { name: "Weiter zur Bank" });
     // Markiert und gewählt ist dasselbe: zu Beginn die erste Bank der Liste
@@ -887,6 +923,15 @@ test("Jahreserklärung: Summen stehen offen, die Einzelzeilen hinter „Zeilen a
   await expect(euer.getByRole("row", { name: /^Entnahmen einschließlich/ })).toBeVisible();
 });
 
+test("Jahreserklärung: der Name der Schalter zum Aufklappen enthält kein Pfeilzeichen (#1253)", async () => {
+  await go(`/jahreserklaerung/${YEAR - 1}`);
+  const cdp = await page.context().newCDPSession(page);
+  const { nodes } = await cdp.send("Accessibility.getFullAXTree");
+  const namen = nodes.filter((n) => n.role?.value === "DisclosureTriangle").map((n) => String(n.name?.value));
+  expect(namen.some((n) => n.includes("Zeilen anzeigen"))).toBe(true);
+  expect(namen.filter((n) => n.includes("›"))).toEqual([]);
+});
+
 test("Jahreserklärung: die Erklärungen stehen in einer nummerierten Reihenfolge, der nächste Schritt führt zum Abschnitt (#1253)", async () => {
   await go(`/jahreserklaerung/${YEAR - 1}`);
   const reihenfolge = page.getByRole("region", { name: "Reihenfolge der Erklärungen" });
@@ -1182,6 +1227,15 @@ test("Zeilenwerte aus dem Übermittlungsprotokoll ersetzen Habens Rechnung (#997
   await expect(erfassen).toBeVisible({ timeout: 15_000 });
   await erfassen.locator("summary").first().click();
   await erfassen.getByLabel("Steuerpflichtiger Gewinn / Verlust (gewinn)").fill("1.234,56");
+  // Ein nicht lesbarer Wert: Meldung am Feld, Fokus dort, nichts gespeichert, die Eingaben bleiben (#1270)
+  const ausgaben = erfassen.getByLabel("Summe der Betriebsausgaben (ausgaben)");
+  await ausgaben.fill("12€50");
+  await erfassen.getByRole("button", { name: "Zeilenwerte speichern" }).click();
+  await expect(erfassen.getByText("Trag den Betrag der Zeile ein, etwa 1.234,56, oder lass das Feld leer.")).toBeVisible();
+  await expect(ausgaben).toBeFocused();
+  await expect(erfassen.getByLabel("Steuerpflichtiger Gewinn / Verlust (gewinn)")).toHaveValue("1.234,56");
+  await expect(page.getByText("Diese Zahlen stammen aus dem Übermittlungsprotokoll", { exact: false })).toHaveCount(0);
+  await ausgaben.fill("");
   await erfassen.getByRole("button", { name: "Zeilenwerte speichern" }).click();
 
   // Die erklärten Werte ersetzen Habens Rechnung und nennen ihre Herkunft

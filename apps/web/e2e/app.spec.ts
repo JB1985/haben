@@ -18,6 +18,7 @@ import {
   gehe,
   INVOICES,
   kontaktAnlegen,
+  kontoVerbinden,
   kundeWaehlen,
   rechnungFestschreiben,
   lieferantWaehlen,
@@ -535,6 +536,46 @@ test("Mahnung: Einleitung und Schluss lassen sich mit den Knöpfen auszeichnen (
   ).toBe("%PDF-");
 });
 
+test("Ausgeblendete Rechnungsbereiche lassen Korrekturen und den Mahnverlauf sichtbar", async () => {
+  await go("/rechnungen/mahnwesen");
+  await page.getByRole("link", { name: "Zahlungserinnerung", exact: true }).first().click();
+  await page.waitForURL(/mahnwesen\/[0-9a-f-]{36}$/);
+  const mahnseite = new URL(page.url()).pathname;
+  await page.waitForLoadState("networkidle");
+  await page.getByRole("button", { name: "Zahlungserinnerung erstellen" }).click();
+  await page.waitForURL(/rechnungen\/[0-9a-f-]{36}$/);
+  const rechnungsseite = new URL(page.url()).pathname;
+  const mahnungen = page.getByRole("region", { name: "Mahnungen" });
+  await expect(mahnungen.getByRole("button", { name: "per E-Mail" })).toBeVisible();
+
+  const bereiche = "/einstellungen?bereich=bereiche";
+  const schalter = (name: string) => page.getByRole("checkbox", { name, exact: true });
+  const aendern = async (sichtbar: boolean) => {
+    await go(bereiche);
+    for (const name of ["Mahnwesen", "Rechnungen schreiben"]) {
+      await schalter(name).setChecked(sichtbar);
+      await expect(schalter(name)).toBeEnabled();
+    }
+  };
+  await aendern(false);
+  try {
+    await go(rechnungsseite);
+    await expect(mahnungen.getByRole("link", { name: /^Zahlungserinnerung vom/ })).toBeVisible();
+    await expect(mahnungen.getByRole("button", { name: "per E-Mail" })).toHaveCount(0);
+    await expect(mahnungen.getByRole("link", { name: "Nächste Mahnstufe" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Kopieren", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Stornieren", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Rechnungskorrektur anlegen" })).toBeVisible();
+    await go("/rechnungen/mahnwesen");
+    await expect(page.getByRole("heading", { level: 1, name: "Mahnwesen" })).toBeVisible();
+    await expect(page.locator('a[href^="/rechnungen/mahnwesen/"]')).toHaveCount(0);
+    await go(mahnseite);
+    await expect(page.getByRole("button", { name: /erstellen$/ })).toBeVisible();
+  } finally {
+    await aendern(true);
+  }
+});
+
 /** IBAN des Lieferanten Funknetz Mobil GmbH, im Kontakt und im Kontoauszug */
 const SUPPLIER_IBAN = "DE02100100100006820101";
 /** EndToEndId der SEPA-Überweisung für den Mobilfunkbeleg; der Kontoauszug nennt sie als Kundenreferenz */
@@ -585,12 +626,13 @@ test("Überweisung als SEPA-Datei: offenen Beleg wählen, Datei herunterladen, V
   // Ohne Bankkonto gibt es kein Auftraggeberkonto
   await expect(page.getByText(/braucht Haben das Konto, von dem sie abgeht/)).toBeVisible();
   await go("/bank");
-  await page.getByRole("button", { name: "Konto hinzufügen" }).click();
+  await kontoVerbinden(page, "Konto ohne Abruf anlegen");
   const accountForm = page.locator("form").filter({ has: page.getByRole("button", { name: "Konto anlegen" }) });
   await accountForm.getByRole("textbox", { name: "Name" }).fill("Girokonto");
   await accountForm.getByRole("textbox", { name: "IBAN" }).fill("DE45 1203 0000 1234 5678 90");
   await accountForm.getByRole("button", { name: "Konto anlegen" }).click();
-  await expect(page.getByRole("combobox", { name: "Konto" }).locator("option", { hasText: "Girokonto" })).toHaveCount(1);
+  // Das neue Konto ist gewählt: seine Karte steht in der Leiste (#1951)
+  await expect(page.getByRole("navigation", { name: "Konten" }).getByRole("link", { name: /^Girokonto/ })).toHaveAttribute("aria-current", "page");
 
   await go("/ueberweisungen");
   const form = page.getByRole("form", { name: "SEPA-Überweisung erzeugen" });
@@ -1151,12 +1193,20 @@ test("Lohn: Minijob anlegen und den laufenden Monat abrechnen", async ({ browser
   await form.getByLabel("Ort", { exact: true }).fill("Regensburg");
   await form.getByLabel("Geburtsdatum").fill("2001-03-15");
   await form.getByLabel("Art der Beschäftigung").selectOption("minijob");
-  await form.getByLabel("Monatsgehalt brutto in Euro").fill("520,00");
+  const gehalt = form.getByLabel("Monatsgehalt brutto in Euro");
+  await gehalt.fill("3.000 Euro");
   await form.getByLabel("Eintritt", { exact: true }).fill(`${currentYear()}-01-01`);
   await form.getByLabel("Steuer-ID").fill("47291830467");
   await form.getByLabel("Versicherungsnummer").fill("65150301A123");
   await form.getByLabel("Personengruppe").fill("109");
   await form.getByLabel("Beitragsgruppenschlüssel").fill("6100");
+  // Ein nicht lesbarer Betrag: Meldung an genau diesem Feld, Fokus dort, nichts angelegt (#1277)
+  await form.getByRole("button", { name: "Mitarbeiter anlegen" }).click();
+  await expect(form.getByText("Trag den Betrag ein, etwa 1.234,56.")).toBeVisible();
+  await expect(gehalt).toBeFocused();
+  await expect(gehalt).toHaveAttribute("aria-invalid", "true");
+  await expect(page).toHaveURL(/\/lohn\/mitarbeiter\/neu$/);
+  await gehalt.fill("520,00");
   await form.getByRole("button", { name: "Mitarbeiter anlegen" }).click();
   await page.waitForURL(/\/lohn$/);
   await expect(page.getByRole("link", { name: "Jonas Aushilfe", exact: true })).toBeVisible();
@@ -1173,7 +1223,7 @@ test("Lohn: Minijob anlegen und den laufenden Monat abrechnen", async ({ browser
 test("Dauerbeleg: Miete mit Vertrag anlegen, Beleg zu prüfen, im Bankabgleich buchen und zuordnen", async () => {
   const termin = day(-4);
   await go("/dauerbelege");
-  await page.getByRole("link", { name: "Neuer Dauerbeleg" }).click();
+  await page.locator(".page-head").getByRole("link", { name: "Neuer Dauerbeleg" }).click();
   await page.waitForURL(/\/dauerbelege\/neu$/);
   await page.waitForLoadState("networkidle");
   await page.getByLabel("Bezeichnung").fill("Büromiete Hafenstraße");
@@ -1189,7 +1239,7 @@ test("Dauerbeleg: Miete mit Vertrag anlegen, Beleg zu prüfen, im Bankabgleich b
   // Ohne Steuerausweis gibt es keine Vorsteuer; der Vertrag weist sie hier aus (Option nach § 9 UStG)
   await expect(page.getByText(/Vorsteuer nur mit einem Dokument/)).toBeVisible();
   await page.getByLabel("Steuersatz 1").selectOption("1900");
-  await page.getByLabel(/weist die Umsatzsteuer gesondert aus/).check();
+  await page.getByLabel(/^Weist die Umsatzsteuer gesondert aus/).check();
   await page.getByLabel("Netto 1").fill("500,00");
   await expect(page.getByLabel("Umsatzsteuer 1")).toHaveValue("95,00");
   await expect(page.getByText("Je Termin: 500,00 € netto + 95,00 € Umsatzsteuer = 595,00 €")).toBeVisible();

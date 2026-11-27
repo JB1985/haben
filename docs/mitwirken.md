@@ -17,7 +17,7 @@ bun run typecheck
 TEST_DATABASE_URL=postgres://haben:haben@localhost:5432/haben_test bun run test
 bun run build
 E2E_DATABASE_URL=postgres://haben:haben@localhost:5432/haben_e2e bun run e2e   # ohne Browser von Playwright nur in der CI
-zensical build --strict                                                       # wenn docs/ oder mkdocs.yml geändert sind
+zensical build --strict && python scripts/doku-listen/haben_doku_listen.py site  # wenn docs/ oder mkdocs.yml geändert sind
 ```
 
 Beide Datenbanken leeren die Tests (siehe [Tests](entwicklung.md#tests)); nie auf einen Server mit echten Daten zeigen lassen. Was übersprungen wurde, gehört in die Beschreibung des Pull Requests.
@@ -32,7 +32,7 @@ Beide Datenbanken leeren die Tests (siehe [Tests](entwicklung.md#tests)); nie au
 
 ## Etwas übernehmen
 
-Wer mitbauen will, sucht sich eine Aufgabe im [Project „Roadmap“](https://github.com/orgs/Speicherstadt/projects/3) aus:
+Wer mitbauen will, sucht sich eine Aufgabe im [Project „Roadmap Haben“](https://github.com/orgs/Speicherstadt/projects/3) aus:
 
 1. **Aussuchen:** eine Karte aus „Geplant“, am liebsten weit oben, denn die Reihenfolge ist die Priorität. Für den Einstieg eignen sich Karten mit Aufwand „S“ und Issues mit dem Label [`einstieg`](https://github.com/Speicherstadt/haben/issues?q=is%3Aopen+label%3Aeinstieg). Ein Entwurf ohne Issue bekommt zuerst ein Issue.
 2. **Übernehmen:** im Issue eine Zeile `/übernehmen` kommentieren, gern mit einem kurzen Plan darunter. Der Workflow „Übernehmen“ (`.github/workflows/uebernehmen.yml`) weist dir das Issue zu, schiebt die Karte nach „In Arbeit“ und bestätigt es im Issue; Schreibrecht brauchst du dafür nicht. Er lehnt mit Begründung ab, wenn das Issue schon vergeben ist, noch keine Karte hat oder die Karte schon in „Im nächsten Release“ oder „Erledigt“ steht. Eine Karte in „In Arbeit“ ohne Zuweisung, etwa weil ein Pull Request sie vorgezogen hat, lässt sich übernehmen. Wie viele Karten jemand übernimmt, ist nicht begrenzt. Bei Karten aus „Später“ den Umfang am besten erst kurz im Issue klären.
@@ -42,17 +42,18 @@ Wer mitbauen will, sucht sich eine Aufgabe im [Project „Roadmap“](https://gi
 ## Branches, Titel und Commits
 
 - **Branch:** Wer Schreibrecht hat, legt den Branch direkt in `Speicherstadt/haben` an, alle anderen in ihrem Fork. Direkt auf `main` wird nicht gepusht, außer zur Reparatur eines roten `main` ([Wer mergt was](#wer-mergt-was)). Vor jedem Push prüfen, ob der Pull Request des Branches noch offen ist; ist er gemergt, neu von `origin/main` und ein neuer Pull Request. Force-Push nur mit `--force-with-lease` auf den eigenen Branch nach einem Merge.
-- **Entwurf:** Ein Pull Request bleibt Entwurf, solange noch an ihm gearbeitet wird; die CI startet erst mit „Ready for review“. Danach belegt jeder Push alle Jobs neu, und die Runner teilt sich die ganze Organisation: Commits sammeln und gemeinsam pushen, für größere Nacharbeit zurück auf Entwurf (`gh pr ready --undo`). Die CI lässt Jobs aus, die die Änderung nicht berührt, bei reinem Markdown alles außer dem Doku-Build (Job `changes` in `ci.yml`); auf `main` und im Release laufen alle.
+- **Entwurf:** Ein Pull Request bleibt Entwurf, solange noch an ihm gearbeitet wird; die CI startet erst mit „Ready for review“. Danach belegt jeder Push alle Jobs neu, und die Runner teilt sich die ganze Organisation: Commits sammeln und gemeinsam pushen, für größere Nacharbeit zurück auf Entwurf (`gh pr ready --undo`). Die CI lässt Jobs aus, die die Änderung nicht berührt, bei reinem Markdown alles außer dem Doku-Build (Job `changes` in `ci.yml`); `container` und `dev-compose` nur, wenn sich ein Image, eine Compose-Datei oder Abhängigkeiten ändern. Auf `main` laufen die Prüfungen der E-Rechnung und der Images für Nutzer ebenso nur bei passenden Änderungen, ein neuer Merge bricht den Lauf des vorigen ab; im Release laufen alle.
 - **Titel:** `Bereich: was sich ändert (#Issue)`, etwa „Belege: eigene Ausgangsrechnung beim Upload erkennen (#104)“; die Nummer nur, falls es ein Issue gibt. Jede Nummer aus `Umgesetzt #…` gehört hinein; bei `Refs #…` nur, wenn es ein Issue ist und kein anderer Pull Request. Der Bereich ist ein bis drei Wörter, groß geschrieben (klein nur bei Namen wie „sevDesk“), ohne Punkt am Ende. Pull Requests werden per Squash gemergt; der Titel wird dann der Commit auf `main`. Der Workflow „PR-Regeln“ prüft das, auch für Entwürfe; Pull Requests von Bots wie Renovate behalten ihre eigenen Titel (siehe [Automatische Prüfungen der Regeln](#automatische-prüfungen-der-regeln)).
 - **Beschreibung:** Beim Squash wird die Beschreibung des Pull Requests die Nachricht des Commits auf `main` (Einstellung des Repositorys: `PR_BODY`) und bleibt so in der Historie. Sie muss deshalb bis zum Merge zum Stand des Pull Requests passen: Ändert ein weiterer Push, was der Pull Request tut oder wie er geprüft wurde, ändert sich die Beschreibung mit, auch nach Fixes aus dem Review und nach einem Rebase. Sie nennt alles, was der Pull Request ändert, und beschreibt das Ergebnis, nicht den Weg dorthin; Zwischenstände und Antworten auf Reviews gehören in Kommentare.
 - **Hinweis für das Release:** Muss jemand beim Update etwas wissen oder tun (geändertes Verhalten, eine Schnittstelle, Doppelte bei einem erneuten Import), steht das in der Beschreibung unter der Überschrift `## Für das Release`, vor der Kennzeichnung „🤖 Generated with …“. Das Release setzt diese Abschnitte über die Liste der Änderungen; was Nutzer dauerhaft wissen müssen, steht zusätzlich in der Doku.
 - **Issues in der Beschreibung:** mit `Umgesetzt #…`, wenn der Pull Request das Issue fertig macht, sonst mit `Refs #…` (ein Teil). Hält der Pull Request nur etwas zu einem Issue fest, ohne daran zu arbeiten (etwa eine Entscheidung in `roadmap.md`), steht `#…` ohne Stichwort; mit `Refs` schöbe das Board die Karte nach „In Arbeit“. Mehrere gehen als Liste: `Umgesetzt #12, #13`. Kommt ein Issue in mehreren Pull Requests, trägt der letzte Teil `Umgesetzt`; sonst bleibt das Issue nach dem Release offen. Wird `Refs #…` erst nach dem Merge zu `Umgesetzt #…`, zählt das Release es trotzdem, aber nur für ein Issue, das schon beim Merge mit `Refs` dastand. Nie `Closes` oder `Fixes`: GitHub schlösse das Issue schon beim Merge, die Nutzer haben es aber erst mit dem Release; „PR-Regeln“ meldet es als Fehler.
-- **Vom Issue zum Release:** Das [Project „Roadmap“](https://github.com/orgs/Speicherstadt/projects/3) zieht die Karte mit (Workflows „Board“ und „Übernehmen“, `scripts/board/`), nie zurück:
+- **Vom Issue zum Release:** Das [Project „Roadmap Haben“](https://github.com/orgs/Speicherstadt/projects/3) zieht die Karte mit (Workflows „Board“ und „Übernehmen“, `scripts/board/`), nie zurück:
     - Issue zugewiesen oder Pull Request mit `Refs` oder `Umgesetzt` geöffnet → „In Arbeit“.
     - Pull Request mit `Umgesetzt` gemergt → „Im nächsten Release“.
     - Eine fertige Version (kein Release Candidate) schließt diese Issues mit Link auf das Release (Job `issues-schliessen` in `release.yml`) → „Erledigt“.
 
-    Fehlt danach etwas, kommt es in ein neues Issue mit Verweis auf das alte. Die Workflows brauchen das Secret `PROJECT_TOKEN` (klassisches Token mit Scope `project`). Was die Automatik nicht sieht, also neue Issues einordnen, offene Gespräche und Übernahme-Wünsche finden und aufräumen, erledigt der Skill [`board-pflegen`](https://github.com/Speicherstadt/haben/blob/main/.claude/skills/board-pflegen/SKILL.md); jedes Issue bekommt dabei einen kurzen Kommentar mit dem Ergebnis.
+    Fehlt danach etwas, kommt es in ein neues Issue mit Verweis auf das alte. Die Workflows brauchen das Secret `PROJECT_TOKEN` (klassisches Token mit Scope `project`). Ein anderes Repository mit eigenem Board setzt dessen Nummer als Variable `BOARD_NUMMER` (am Repository, nicht an der Organisation); Haben braucht sie nicht. Was die Automatik nicht sieht, also neue Issues einordnen, offene Gespräche und Übernahme-Wünsche finden und aufräumen, erledigt der Skill [`board-pflegen`](https://github.com/Speicherstadt/haben/blob/main/.claude/skills/board-pflegen/SKILL.md); jedes Issue bekommt dabei einen kurzen Kommentar mit dem Ergebnis.
+
 - **Commits im Pull Request:** gern im Stil von [Conventional Commits](https://www.conventionalcommits.org/de/) auf Deutsch, etwa `fix(belege): Fremdwährung in der Rechnungswährung vergleichen` (Empfehlung, keine Prüfung).
 
 ## Mit KI-Werkzeugen
@@ -91,14 +92,17 @@ Was sich sicher entscheiden lässt, prüft ein Skript; was nicht, erscheint als 
 | Doku zum geänderten Verhalten | `scripts/pr-regeln/`: Code unter `apps/web/src`, `apps/firmenportal/src` oder `packages/*/src` ohne Änderung in `docs/` | Hinweis |
 | Bugfix beginnt mit einem Test | `scripts/pr-regeln/`: `fix`-Commit ohne geänderten Test | Hinweis |
 | Selbstprüfung und unabhängiges Review mitbringen ([Beiträge annehmen](#beiträge-annehmen)) | `scripts/pr-regeln/`: Pull Request außerhalb des Entwurfs von jemandem ohne Schreibrecht, nennt `tdd-review` für Code, `doku-pruefen` für Markdown (`docs/`, `mkdocs.yml`, `LICENSE`), bei beidem beide | Hinweis |
+| Neue Abhängigkeit nur mit Begründung ([Konventionen](entwicklung.md#konventionen), „Wenige Abhängigkeiten“) | `scripts/pr-regeln/`: neues Paket in einer `package.json` (auch von `devDependencies` nach `dependencies`); ohne den Paketnamen unter `## Neue Abhängigkeiten` in der Beschreibung Fehler | Hinweis, ohne Begründung Fehler |
 | Fachlich heikle Pfade: Merge erst nach „OK“ des Maintainers ([Wer mergt was](#wer-mergt-was)) | `scripts/pr-regeln/`: Dateien unter `HEIKEL` in `regel.ts` | Hinweis |
 | Skills: Beschreibung höchstens 320 Zeichen, Hauptteil höchstens 1.500 Wörter (außer erzeugten), jede Datei unter `references/` in `SKILL.md` genannt und vorhanden; `CLAUDE.md` und `AGENTS.md` höchstens 10.000 Zeichen, jeder Skill in `AGENTS.md` genannt ([Befehle](entwicklung.md#befehle), „Skills“) | `scripts/skills/` in `bun run lint` | Fehler |
 | Jedes Feld der Belegvorlagen im Feldvertrag, mit Beschreibung | `layout-schema.test.ts` in `bun run test` | Fehler |
 | Kein Feld einer Version fällt weg, wird umbenannt oder wechselt den Typ | `layout-schema.test.ts` gegen `layout-schema.v<n>.json` | Fehler |
 | Alte Layouts ergeben mit heutigen Daten ein PDF | `layout-kompatibel.test.ts` mit `templates/kompatibel/` | Fehler |
 | Skill `belegvorlage` und Feldtabellen aktuell | `layout-anleitung.test.ts` | Fehler |
+| Eyebrow der Menüseiten ist `menueGruppe(…)`, nicht von Hand getippt | `menue-gruppe.test.ts` in `bun run test` | Fehler |
 | Doku baut ohne Warnung | Workflow „Docs“ auch im Pull Request | Fehler |
 | Jede Seite in `docs/` mit `description:` im Front Matter | Workflow „Docs“ (`docs.yml`) | Fehler |
+| Leerzeile vor jeder Liste in `docs/` ([Seiten der Doku](entwicklung.md#befehle), „Listen“) | `scripts/doku-listen/` im Workflow „Docs“ | Fehler |
 | Jede versiegelte, nur anhängbare oder gegen Löschen gesperrte Tabelle und jede, deren Löschen das Audit-Log aufzeichnet, hat einen Trigger vor `TRUNCATE` | `apps/web/src/server/db/truncate.test.ts` in `bun run test` (mit Postgres) | Fehler |
 
 `checks` ist das gemeinsame Paket [`@firsttris/checks`](https://github.com/firsttris/workflows#checks), eingestellt in `checks.json`. Nennt `bun run lint` einen Befehl mit `--clean` (`.checks/large-files.txt`) oder `--aufraeumen` (`altstellen.json`), läuft er im selben Pull Request, und die geänderte Liste wird mitcommittet.
@@ -137,7 +141,7 @@ Größere Vorhaben und Issues von Agenten folgen dieser Gliederung:
 | Stand in Haben | Was Haben heute tut, **auf dem aktuellen `main` geprüft**, mit Commit und Links auf Doku oder Code. Nicht aus dem Gedächtnis. |
 | Vorschlag | Was sich ändern soll, bei Bedarf in Stufen. Grenzen nennen: was ausdrücklich nicht dazugehört. |
 | Akzeptanzkriterien | Drei bis sechs prüfbare Punkte als `- [ ]`, zu denen ein Test oder ein Blick in die Oberfläche Ja oder Nein sagt. Bei Buchungen und Steuer: SKR03 und SKR04, Ist und Soll. |
-| Bezug | Verwandte Issues und Pull Requests, Karte im [Project „Roadmap“](https://github.com/orgs/Speicherstadt/projects/3), Primärquellen mit Link (Gesetz, BMF-Schreiben, Formularanleitung, Formatbeschreibung), bei Fremdprogrammen die Hilfe-Seite. Quellen aus früheren Pull Requests dürfen mit Link auf den Pull Request übernommen werden. |
+| Bezug | Verwandte Issues und Pull Requests, Karte im [Project „Roadmap Haben“](https://github.com/orgs/Speicherstadt/projects/3), Primärquellen mit Link (Gesetz, BMF-Schreiben, Formularanleitung, Formatbeschreibung), bei Fremdprogrammen die Hilfe-Seite. Quellen aus früheren Pull Requests dürfen mit Link auf den Pull Request übernommen werden. |
 
 Ein Issue behandelt ein Thema und passt auf ein bis zwei Bildschirme; Quellcode steht als Link. Fachliche Aussagen belegt eine Quelle, kein Ratgeber; was unsicher ist oder die Steuerberatung entscheiden muss, steht ausdrücklich darin. Der Titel nennt das Ergebnis, nicht den Anlass. Agenten legen Issues nur auf Anweisung an und kennzeichnen sie; die Schritte stehen im Skill `issue-schreiben`. Beim Anlegen kommt der Typ als Label dazu (`fehler`, `wunsch`, `steuer`, `umzug`, `frage`, `technik`, `doku`); fehlt er, ergänzt ihn `board-pflegen` zusammen mit Themen-Labels und dem Platz in der Roadmap, nach OK des Maintainers.
 

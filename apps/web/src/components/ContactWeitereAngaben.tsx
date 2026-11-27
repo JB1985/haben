@@ -3,6 +3,7 @@ import { useState } from "react";
 import { fehlerFelder } from "../lib/format.ts";
 import { FORMAT_LABEL, FORMATS, type InvoiceFormat } from "../lib/invoice.ts";
 import type { ContactInput } from "../server/modules/stammdaten/index.ts";
+import { type BankverbindungOption, BankverbindungField } from "./BankverbindungField.tsx";
 import { Field } from "./Field.tsx";
 import { parseSkontoRows, SkontoFields, type SkontoRow } from "./SkontoFields.tsx";
 import { WeitereAngaben } from "./WeitereAngaben.tsx";
@@ -12,10 +13,13 @@ export interface KontaktWeitereWerte {
   kreditorNr: string;
   hourlyRate: string;
   leitwegId: string;
+  unsereLieferantennummer: string;
   defaultFormat: InvoiceFormat | "";
   /** Skonto: false = wie in den Einstellungen, true = eigene Stufen (leer = ohne Skonto) */
   ownSkonto: boolean;
   skonto: readonly SkontoStufe[];
+  /** Bezeichnung des bevorzugten Zahlungskontos (#1887); leer = Standard */
+  bankverbindung?: string;
 }
 
 /** Was in „Weitere Angaben“ gesetzt ist, für die Überschrift des zugeklappten Bereichs: „Leitweg-ID gesetzt · Skonto 2 % in 10 Tagen“ */
@@ -30,16 +34,27 @@ export function kontaktWeitereKurz(werte: KontaktWeitereWerte): string {
     werte.kreditorNr.trim() && `DATEV-Kreditor ${werte.kreditorNr.trim()}`,
     werte.hourlyRate.trim() && `Stundensatz ${werte.hourlyRate.trim()} €`,
     werte.leitwegId.trim() && "Leitweg-ID gesetzt",
+    werte.unsereLieferantennummer.trim() && `Unsere Lieferantennummer ${werte.unsereLieferantennummer.trim()}`,
     werte.defaultFormat && `Format ${FORMAT_LABEL[werte.defaultFormat].split(" · ")[0]}`,
     skonto,
+    werte.bankverbindung && `Zahlungskonto ${werte.bankverbindung}`,
   ]
     .filter(Boolean)
     .join(" · ");
-  return gesetzt || "optional: DATEV-Konten, Skonto, Stundensatz, Leitweg-ID, Rechnungsformat";
+  return gesetzt || "optional: DATEV-Konten, Skonto, Stundensatz, Leitweg-ID, Unsere Lieferantennummer, Rechnungsformat";
 }
 
 /** Die Felder im Bereich, benannt wie im Formular und in `contactSchema`; ein Fehler nennt sie in `felder` (UserError, Pfad der Zod-Prüfung) */
-const WEITERE_FELDER = ["debitorNr", "kreditorNr", "hourlyRateCents", "leitwegId", "defaultFormat", "skonto"] as const;
+const WEITERE_FELDER = [
+  "debitorNr",
+  "kreditorNr",
+  "hourlyRateCents",
+  "leitwegId",
+  "unsereLieferantennummer",
+  "defaultFormat",
+  "skonto",
+  "bankverbindungId",
+] as const;
 
 /** Das erste Feld im Bereich, an dem ein Fehler liegt; die Seite klappt ihn dann auf und setzt den Fokus dorthin */
 export const weitereAngabenFeld = (error: unknown) => fehlerFelder(error).find((feld) => (WEITERE_FELDER as readonly string[]).includes(feld));
@@ -48,7 +63,7 @@ export const weitereAngabenFeld = (error: unknown) => fehlerFelder(error).find((
 export const feldFehler = (feld: (typeof WEITERE_FELDER)[number], message: string) => Object.assign(new Error(message), { felder: [feld] });
 
 /**
- * Das Seltene am Kontakt eingeklappt (#1253): DATEV-Konten, Stundensatz, Leitweg-ID, Rechnungsformat und Skonto. Die Felder
+ * Das Seltene am Kontakt eingeklappt (#1253): DATEV-Konten, Stundensatz, Leitweg-ID, Lieferantennummer beim Kunden, Rechnungsformat und Skonto. Die Felder
  * bleiben im Formular, auch zugeklappt, und gehen wie zuvor mit dem Speichern an den Server. Den Skonto-Zustand hält die
  * Seite, weil sie ihn beim Speichern prüft; `offen` auch, damit sie den Bereich bei einem Fehler darin aufklappen kann.
  */
@@ -60,6 +75,7 @@ export function ContactWeitereAngaben({
   onSkontoRows,
   offen,
   onOffen,
+  bankverbindungen = { liste: [], standardIban: "" },
 }: {
   initial: ContactInput;
   ownSkonto: boolean;
@@ -68,13 +84,28 @@ export function ContactWeitereAngaben({
   onSkontoRows: (rows: SkontoRow[]) => void;
   offen: boolean;
   onOffen: (offen: boolean) => void;
+  /** Weitere Zahlungskonten (#1887); ohne keine Auswahl */
+  bankverbindungen?: { liste: readonly BankverbindungOption[]; standardIban: string };
 }) {
   const [debitorNr, setDebitorNr] = useState(String(initial.debitorNr ?? ""));
   const [kreditorNr, setKreditorNr] = useState(String(initial.kreditorNr ?? ""));
   const [hourlyRate, setHourlyRate] = useState(initial.hourlyRateCents == null ? "" : formatDecimal(initial.hourlyRateCents));
   const [leitwegId, setLeitwegId] = useState(initial.leitwegId);
+  const [unsereLieferantennummer, setUnsereLieferantennummer] = useState(initial.unsereLieferantennummer ?? "");
   const [defaultFormat, setDefaultFormat] = useState<InvoiceFormat | "">(initial.defaultFormat ?? "");
-  const kurz = kontaktWeitereKurz({ debitorNr, kreditorNr, hourlyRate, leitwegId, defaultFormat, ownSkonto, skonto: parseSkontoRows(skontoRows).stufen });
+  const [bankverbindungId, setBankverbindungId] = useState(initial.bankverbindungId ?? "");
+  const bankverbindung = bankverbindungen.liste.find((b) => b.id === bankverbindungId)?.bezeichnung ?? "";
+  const kurz = kontaktWeitereKurz({
+    debitorNr,
+    kreditorNr,
+    hourlyRate,
+    leitwegId,
+    unsereLieferantennummer,
+    defaultFormat,
+    ownSkonto,
+    skonto: parseSkontoRows(skontoRows).stufen,
+    bankverbindung,
+  });
   return (
     <div className="form-section">
       <WeitereAngaben kurz={kurz} offen={offen} onOffen={onOffen}>
@@ -122,6 +153,21 @@ export function ContactWeitereAngaben({
         <Field label="Leitweg-ID (öffentliche Auftraggeber)" hint="Nur bei Rechnungen an Behörden nötig; steht in deren Auftrag.">
           {(control) => <input {...control} name="leitwegId" value={leitwegId} onChange={(e) => setLeitwegId(e.target.value)} className="mono" />}
         </Field>
+        {/* Die Nummer, unter der uns der Kunde führt (#711); nicht die Lieferantennummer unter „Allgemein“, die meint die Gegenrichtung */}
+        <Field
+          label="Unsere Lieferantennummer bei diesem Kunden"
+          hint="Vom Kunden vergeben. Steht im Kopf der Rechnung und in der E-Rechnung als Verkäuferkennung (BT-29)."
+        >
+          {(control) => (
+            <input
+              {...control}
+              name="unsereLieferantennummer"
+              value={unsereLieferantennummer}
+              onChange={(e) => setUnsereLieferantennummer(e.target.value)}
+              placeholder="optional"
+            />
+          )}
+        </Field>
         <Field label="Standardformat für Rechnungen">
           {(control) => (
             <select {...control} name="defaultFormat" value={defaultFormat} onChange={(e) => setDefaultFormat(e.target.value as InvoiceFormat | "")}>
@@ -150,6 +196,16 @@ export function ContactWeitereAngaben({
             hint="Ohne Stufe bekommt dieser Kunde kein Skonto. Eine Frist, die länger ist als das Zahlungsziel der Rechnung, entfällt dort."
           />
         )}
+        <BankverbindungField
+          label="Bevorzugtes Zahlungskonto"
+          name="bankverbindungId"
+          bankverbindungen={bankverbindungen.liste}
+          standardIban={bankverbindungen.standardIban}
+          value={bankverbindungId}
+          disabled={false}
+          hint="Dein Konto, das neue Rechnungen und Angebote an diesen Kunden vorschlagen; im Beleg lässt es sich ändern. Die IBAN des Kunden steht oben."
+          onChange={setBankverbindungId}
+        />
       </WeitereAngaben>
     </div>
   );

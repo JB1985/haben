@@ -175,6 +175,25 @@ export async function weitereAngabenOeffnen(page: Page): Promise<void> {
   await expect(bereich).toHaveJSProperty("open", true);
 }
 
+/** Klappt „Fristen und Zeitraum ändern“ auf der Voranmeldung (Voranmeldungszeitraum, Dauerfristverlängerung) auf, wenn sie zu sind */
+export async function fristenOeffnen(page: Page): Promise<void> {
+  // Erst nach der Hydration klicken, sonst klappt React den Bereich danach wieder zu
+  await page.waitForLoadState("networkidle");
+  const bereich = page.locator('section[aria-labelledby="ust-fristen"] > details');
+  if (await bereich.evaluate((el) => (el as HTMLDetailsElement).open)) return;
+  await bereich.locator("summary").click();
+  await expect(bereich).toHaveJSProperty("open", true);
+}
+
+/** Über die Schnellsuche (Strg+K) zum Treffer, ohne Neuladen: der Wechsel zwischen zwei Einträgen derselben Art, ohne dass der Browser die Seite neu lädt */
+export async function ueberSchnellsuche(page: Page, suche: string, treffer: RegExp): Promise<void> {
+  await page.keyboard.press("Control+k");
+  const palette = page.getByRole("dialog", { name: "Befehlspalette" });
+  await palette.getByRole("combobox").fill(suche);
+  await palette.getByRole("option", { name: treffer }).click();
+  await expect(palette).toBeHidden();
+}
+
 /** Artikel aus der Trefferliste einer Position übernehmen */
 export async function artikelInPosition(page: Page, position: number, bezeichnung: string): Promise<void> {
   await page.getByLabel(`Beschreibung Position ${position}`).fill(bezeichnung);
@@ -207,6 +226,21 @@ export async function rechnungFestschreiben(page: Page, rechnung: Rechnung): Pro
 }
 
 /** Die Rückfrage im ConfirmDialog mit dem Knopf der Aktion bestätigen */
+/** Bankseite: ein Punkt im Menü „Konto verbinden“ (#1951), etwa „Konto ohne Abruf anlegen“ oder „Bank hinzufügen“ */
+export async function kontoVerbinden(page: Page, punkt: string): Promise<void> {
+  await page.getByRole("button", { name: "Konto verbinden" }).click();
+  await page.getByRole("menu", { name: "Konto verbinden" }).getByRole("menuitem", { name: punkt }).click();
+}
+
+/** Bankseite: „Bank hinzufügen“ und im Dialog „Wie verbinden?“ einen Weg, etwa „FinTS (PIN/TAN)“ */
+export async function bankVerbinden(page: Page, weg: string): Promise<void> {
+  await kontoVerbinden(page, "Bank hinzufügen");
+  const dialog = page.getByRole("dialog", { name: "Wie verbinden?" });
+  await dialog.getByRole("radio", { name: weg }).check();
+  await dialog.getByRole("button", { name: "Weiter" }).click();
+  await expect(dialog).toHaveCount(0);
+}
+
 export async function bestaetigen(page: Page, aktion: string): Promise<void> {
   await page.getByRole("dialog").getByRole("button", { name: aktion, exact: true }).click();
 }

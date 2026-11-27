@@ -4,7 +4,14 @@ import { authMiddleware } from "../middleware.ts";
 import { listContactChoices, loadCompany } from "../modules/stammdaten/index.ts";
 import { assertOutgoingOpen, markOutgoingAdopted } from "../modules/belege/index.ts";
 import { kleinunternehmerStand } from "../modules/auswertungen/index.ts";
-import { adoptForeignInvoiceFile, foreignInvoiceProposal, type ForeignInvoiceInput, UmsatzgrenzeError } from "../modules/rechnungen/index.ts";
+import {
+  adoptForeignCancellationFile,
+  adoptForeignInvoiceFile,
+  type ForeignCancellationInput,
+  foreignInvoiceProposal,
+  type ForeignInvoiceInput,
+  UmsatzgrenzeError,
+} from "../modules/rechnungen/index.ts";
 
 /** Wie bei Belegen: höchstens 20 MB, ein Original je Rechnung */
 const MAX_SIZE = 20 * 1024 * 1024;
@@ -31,23 +38,28 @@ export const readForeignInvoice = createServerFn({ method: "POST" })
     };
   });
 
+/** Datei als Original und die Angaben als JSON im Feld `feld` */
+function fileWithJson(data: unknown, feld: string): { file: File; parsed: unknown } {
+  const file = fileOf(data);
+  const raw = (data as FormData).get(feld);
+  if (typeof raw !== "string") throw new UserError("Angaben zur Rechnung fehlen.");
+  try {
+    return { file, parsed: JSON.parse(raw) };
+  } catch {
+    throw new UserError("Angaben zur Rechnung sind kein gültiges JSON.");
+  }
+}
+
+/** Kommt die Datei aus dem Postfach, steht im Feld `postfach` der Eintrag, der danach als übernommen gilt */
+function postfachOf(data: unknown): string | null {
+  const postfach = (data as FormData).get("postfach");
+  return typeof postfach === "string" && postfach ? postfach : null;
+}
+
 /** Legt die geprüfte Rechnung an: Datei als Original, Angaben als JSON im Feld `rechnung` */
 export const adoptForeignInvoiceFn = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((data: unknown) => {
-    const file = fileOf(data);
-    const raw = (data as FormData).get("rechnung");
-    if (typeof raw !== "string") throw new UserError("Angaben zur Rechnung fehlen.");
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      throw new UserError("Angaben zur Rechnung sind kein gültiges JSON.");
-    }
-    // Kommt die Datei aus dem Postfach, steht hier der Eintrag, der danach als übernommen gilt
-    const postfach = (data as FormData).get("postfach");
-    return { file, parsed, postfach: typeof postfach === "string" && postfach ? postfach : null };
-  })
+  .validator((data: unknown) => ({ ...fileWithJson(data, "rechnung"), postfach: postfachOf(data) }))
   .handler(async ({ data, context }) => {
     const bytes = new Uint8Array(await data.file.arrayBuffer());
     if (data.postfach) await assertOutgoingOpen(data.postfach);
@@ -74,4 +86,20 @@ export const adoptForeignInvoiceFn = createServerFn({ method: "POST" })
         vorjahresumsatz: error.vorjahresumsatz,
       };
     }
+  });
+
+/** Übernimmt das Storno einer Fremdsystem-Rechnung (#1900): Datei als Original, Rechnung, Nummer und Datum als JSON im Feld `storno` */
+export const adoptForeignCancellationFn = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((data: unknown) => ({ ...fileWithJson(data, "storno"), postfach: postfachOf(data) }))
+  .handler(async ({ data, context }) => {
+    const bytes = new Uint8Array(await data.file.arrayBuffer());
+    if (data.postfach) await assertOutgoingOpen(data.postfach);
+    const storno = await adoptForeignCancellationFile(context.user.id, data.parsed as ForeignCancellationInput, {
+      bytes,
+      filename: data.file.name,
+      mimeType: data.file.type,
+    });
+    if (data.postfach) await markOutgoingAdopted(context.user.id, data.postfach, storno.id);
+    return storno;
   });

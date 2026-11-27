@@ -1,16 +1,17 @@
-import { distinctVatRates, CURRENCY_CODE, formatEuro } from "@haben/core";
+import { distinctVatRates, CURRENCY_CODE } from "@haben/core";
 import { type ComponentProps, useRef } from "react";
-import { formatDate } from "../lib/format.ts";
 import { useLoadedState } from "../lib/use-loaded-state.ts";
 import { ActionBar } from "./ActionBar.tsx";
 import { DesignPanel, useDesignDraft } from "./DesignPanel.tsx";
 import { PreviewButton, PreviewLayout, useDocumentPreview } from "./DocumentPreview.tsx";
 import { Icon } from "./Icon.tsx";
+import { FINALIZE_HINT, FINALIZE_HINT_ID } from "./InvoiceEditorHinweise.tsx";
 import { InvoiceEditorPreview } from "./InvoiceEditorPreview.tsx";
 import { useInvoiceCopy } from "./InvoiceCopyButton.tsx";
 import { MoreActionsMenu } from "./MoreActionsMenu.tsx";
 import { PaymentPlanFields } from "./PaymentPlanFields.tsx";
 import { InvoiceEditorDetails } from "./InvoiceEditorDetails.tsx";
+import { InvoiceDeductsCard } from "./InvoiceDeductsCard.tsx";
 import { InvoiceEditorDialogs } from "./InvoiceEditorDialogs.tsx";
 import { InvoiceEditorHead } from "./InvoiceEditorHead.tsx";
 import { InvoiceEditorLines } from "./InvoiceEditorLines.tsx";
@@ -35,15 +36,14 @@ export function InvoiceEditor(props: InvoiceEditorProps) {
   const {
     alreadyPaid,
     attachments,
+    bankverbindungId,
     busy,
     contactId,
     copySource,
     contactPersonId,
     corrects,
     currencyCode,
-    customerAbschlaege,
     deductionPreview,
-    deducts,
     dirty,
     discount,
     discountIssue,
@@ -91,7 +91,6 @@ export function InvoiceEditor(props: InvoiceEditorProps) {
     taxTreatment,
     term,
     termValid,
-    toggleDeduct,
     touch,
     validUntil,
     variant,
@@ -105,7 +104,7 @@ export function InvoiceEditor(props: InvoiceEditorProps) {
   return (
     <>
       <InvoiceEditorDialogs editor={editor} />
-      <InvoiceEditorHead editor={editor} preview={preview} />
+      <InvoiceEditorHead editor={editor} preview={preview} replaces={props.replaces} />
 
       <PreviewLayout
         preview={preview}
@@ -130,6 +129,7 @@ export function InvoiceEditor(props: InvoiceEditorProps) {
               paymentTermDays: termValid ? term : 0,
               contactId: contactId || null,
               contactPersonId: contactPersonId || null,
+              bankverbindungId: lastschrift ? null : bankverbindungId || null,
               ...references,
               lines: [...parsed, ...deductionPreview],
               discount: discountIssue ? null : discount,
@@ -155,80 +155,59 @@ export function InvoiceEditor(props: InvoiceEditorProps) {
         }
       >
         <form ref={form} id="invoice-form" className="stack" onSubmit={onSave} noValidate>
-          <InvoiceEditorDetails editor={editor} />
+          {/* Während eine Aktion läuft, gesperrt: Nach dem Speichern baut die Seite den Editor mit dem gespeicherten Stand neu auf,
+              beim ersten Speichern auf der Adresse des Entwurfs, sonst mit dem neuen `updatedAt` im `key`. Was man bis dahin
+              tippt, ginge verloren (#1148) */}
+          <fieldset className="stack fieldset-plain" disabled={busy}>
+            <InvoiceEditorDetails editor={editor} />
 
-          {schluss && (
-            <section className="card" aria-labelledby="deducts-heading">
-              <h2 id="deducts-heading">Abschlagsrechnungen abziehen</h2>
-              {!contactId ? (
+            {schluss && <InvoiceDeductsCard editor={editor} />}
+
+            <InvoiceEditorLines editor={editor} />
+
+            {quote && (
+              <section className="card" aria-labelledby="plan-heading">
+                <h2 id="plan-heading">Zahlungsplan</h2>
                 <p className="small muted" style={{ margin: 0 }}>
-                  Erst den Kunden wählen.
+                  Optional: in welchen Teilen der Auftrag abgerechnet wird, etwa 30 % bei Auftragserteilung, 40 % bei Lieferung und der Rest mit der
+                  Schlussrechnung. Der Plan steht im Angebots-PDF; aus jeder Zeile entsteht später mit einem Klick die Abschlagsrechnung.
                 </p>
-              ) : customerAbschlaege.length === 0 ? (
-                <p className="small muted" style={{ margin: 0 }}>
-                  Für diesen Kunden gibt es keine offenen festgeschriebenen Abschlagsrechnungen.
-                </p>
-              ) : (
-                customerAbschlaege.map((a) => (
-                  <label key={a.id} className="checkbox">
-                    <input type="checkbox" checked={deducts.includes(a.id)} onChange={(e) => toggleDeduct(a.id, e.target.checked)} />
-                    <span>
-                      Abschlagsrechnung {a.number} vom {formatDate(a.issueDate)} · {formatEuro(a.gross)}
-                    </span>
+                <PaymentPlanFields
+                  id="quote-plan"
+                  rows={planRows}
+                  onChange={touch(setPlanRows)}
+                  templates={planTemplates}
+                  amounts={planAmounts}
+                  priceMode={grossPrices ? "brutto" : "netto"}
+                  taxed={!special}
+                />
+                {planRows.length > 0 && (
+                  <label className="checkbox">
+                    <input type="checkbox" checked={planInConfirmation} onChange={(e) => touch(setPlanInConfirmation)(e.target.checked)} />
+                    <span>Zahlungsplan auch in der Auftragsbestätigung</span>
                   </label>
-                ))
-              )}
-              <p className="small muted" style={{ margin: 0 }}>
-                Unter Positionen steht die gesamte Leistung. Die Abzüge erscheinen auf der Rechnung als eigene Positionen mit Netto und Umsatzsteuer der
-                Abschlagsrechnung (§ 14 Abs. 5 UStG).
-              </p>
-            </section>
-          )}
+                )}
+              </section>
+            )}
 
-          <InvoiceEditorLines editor={editor} />
+            {attachments}
 
-          {quote && (
-            <section className="card" aria-labelledby="plan-heading">
-              <h2 id="plan-heading">Zahlungsplan</h2>
-              <p className="small muted" style={{ margin: 0 }}>
-                Optional: in welchen Teilen der Auftrag abgerechnet wird, etwa 30 % bei Auftragserteilung, 40 % bei Lieferung und der Rest mit der
-                Schlussrechnung. Der Plan steht im Angebots-PDF; aus jeder Zeile entsteht später mit einem Klick die Abschlagsrechnung.
-              </p>
-              <PaymentPlanFields
-                id="quote-plan"
-                rows={planRows}
-                onChange={touch(setPlanRows)}
-                templates={planTemplates}
-                amounts={planAmounts}
-                priceMode={grossPrices ? "brutto" : "netto"}
-                taxed={!special}
-              />
-              {planRows.length > 0 && (
-                <label className="checkbox">
-                  <input type="checkbox" checked={planInConfirmation} onChange={(e) => touch(setPlanInConfirmation)(e.target.checked)} />
-                  <span>Zahlungsplan auch in der Auftragsbestätigung</span>
-                </label>
-              )}
-            </section>
-          )}
-
-          {attachments}
-
-          <div className="banner banner-info">
-            <Icon name="info" />
-            <span>
-              {quote
-                ? "Nach dem Festschreiben bekommt das Angebot seine Nummer und ist nicht mehr änderbar. Nimmt der Kunde an, machst du daraus mit einem Klick eine Rechnung."
-                : "Nach dem Festschreiben bekommt die Rechnung ihre endgültige Nummer und ist nicht mehr änderbar. Korrekturen laufen über eine Stornorechnung oder Rechnungskorrektur."}
-            </span>
-          </div>
-          {id && (
-            <div className="actions">
-              <button type="button" className="btn btn-danger" onClick={() => setConfirmingDelete(true)} disabled={busy}>
-                Entwurf löschen
-              </button>
+            <div className="banner banner-info" id={FINALIZE_HINT_ID}>
+              <Icon name="info" />
+              <span>
+                {quote
+                  ? "Nach dem Festschreiben bekommt das Angebot seine Nummer und ist nicht mehr änderbar. Nimmt der Kunde an, machst du daraus mit einem Klick eine Rechnung."
+                  : "Nach dem Festschreiben bekommt die Rechnung ihre endgültige Nummer und ist nicht mehr änderbar. Korrekturen laufen über eine Stornorechnung oder Rechnungskorrektur."}
+              </span>
             </div>
-          )}
+            {id && (
+              <div className="actions">
+                <button type="button" className="btn btn-danger" onClick={() => setConfirmingDelete(true)} disabled={busy}>
+                  Entwurf löschen
+                </button>
+              </div>
+            )}
+          </fieldset>
         </form>
       </PreviewLayout>
       <ActionBar>
@@ -261,7 +240,7 @@ export function InvoiceEditor(props: InvoiceEditorProps) {
         <button type="submit" form="invoice-form" className="btn" disabled={busy || !dirty}>
           Entwurf speichern
         </button>
-        <button type="button" className="btn btn-primary" disabled={busy} onClick={onFinalize}>
+        <button type="button" className="btn btn-primary" title={FINALIZE_HINT} aria-describedby={FINALIZE_HINT_ID} disabled={busy} onClick={onFinalize}>
           Festschreiben
         </button>
       </ActionBar>

@@ -65,13 +65,13 @@ const EXPENSE = mapFbExpense({
 
 describe.skipIf(!testDatabaseUrl)("FastBill-Altbestand bei Ist und Soll (Postgres)", () => {
   let sql: postgres.Sql;
-  let archive: typeof import("./lexoffice.ts");
+  let archive: typeof import("./umzug-abgleich.ts");
   let legacy: typeof import("./legacy-open.ts");
   const ids = new Map<string, string>();
 
   beforeAll(async () => {
     sql = await setupTestDb();
-    archive = await import("./lexoffice.ts");
+    archive = await import("./umzug-abgleich.ts");
     legacy = await import("./legacy-open.ts");
     await sql`insert into company (id, name, strasse, plz, ort, email, telefon, steuernummer, ust_id, bundesland, iban, versteuerung, kontenrahmen)
       values (1, 'Testfirma', 'Musterstraße 1', '93047', 'Regensburg', 'rechnung@example.com', '+49 941 1', '198/113/10010',
@@ -113,18 +113,20 @@ describe.skipIf(!testDatabaseUrl)("FastBill-Altbestand bei Ist und Soll (Postgre
     }
   });
 
-  it("zeigt im Abgleich je Jahr, wenn Ausgaben noch auf ihren Beleg aus dem Browser-Skript warten", async () => {
+  it("zeigt im Abgleich je Jahr, wenn Ausgaben oder Einnahmen noch auf ihren Beleg aus dem Browser-Skript warten", async () => {
+    // Eine Ausgabe und eine Einnahme (#1938), beide nicht im Archiv, solange der Beleg fehlt
     await sql`insert into fastbill_receipts (expense_id, status, number, date, supplier, gross, document_url)
-      values ('9301', 'wartet', 'L-2', '2025-06-01', 'Lieferant', 1190, 'https://my.fastbill.com/download/x')`;
+      values ('9301', 'wartet', 'L-2', '2025-06-01', 'Lieferant', 1190, 'https://my.fastbill.com/download/x'),
+             ('einnahme-9302', 'wartet', 'GS-1', '2025-06-02', 'Plattform', 2380, 'https://my.fastbill.com/download/y')`;
     try {
       const year = (await archive.reconciliation()).years.find((y) => y.year === 2025)!;
-      expect(year.checks).toContainEqual({ ok: false, label: "Keine Ausgabe wartet auf ihren Beleg", detail: "1 Ausgabe aus FastBill wartet" });
+      expect(year.checks).toContainEqual({ ok: false, label: "Kein Beleg aus FastBill wartet auf seine Datei", detail: "2 Belege aus FastBill warten" });
       expect(year.ready).toBe(false);
     } finally {
       await sql`delete from fastbill_receipts`;
     }
     const year = (await archive.reconciliation()).years.find((y) => y.year === 2025)!;
-    expect(year.checks.map((c) => c.label)).not.toContain("Keine Ausgabe wartet auf ihren Beleg");
+    expect(year.checks.map((c) => c.label)).not.toContain("Kein Beleg aus FastBill wartet auf seine Datei");
   });
 
   it("bittet im Abgleich je Jahr um Prüfung einer Rechnung mit Teilstorno", async () => {

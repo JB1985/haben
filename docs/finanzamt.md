@@ -23,6 +23,8 @@ Der Abruf läuft in drei Schritten, wie bei viking:
 
 ELSTER erwartet die Bestätigung innerhalb von 24 Stunden, sonst droht die Sperre der Hersteller-ID. Scheitert sie, zeigt die Seite einen Hinweis; der nächste Abruf holt die Bestätigung nach. Abgeholte Dokumente legt Haben nicht doppelt ab. Jeder Abruf und jede Bestätigung wird mit dem XML gespeichert, ebenso wie die Dokumente unveränderlich.
 
+Mit Testmerker liest ein Abruf nur die Test-Datenbank. Für die PostfachAnfrage gilt dort ein eigener Testmerker (700000001 laut ERiC-Entwicklerhandbuch); der allgemeine Wert gilt nur für Übermittlungen. Scheitert der Testabruf, nennt der Hinweis den Weg zum echten Abruf: den Haken „Nur Testübermittlung“ unter dem PIN-Feld ausschalten, dann heißt der Knopf „Postfach abrufen“. Das geht nur mit eingetragener Hersteller-ID, ohne sie ist der Haken gesperrt. Auch der echte Abruf bestätigt die Abholung (siehe oben). Ohne ERiC bleibt der Haken sinnvoll, dann liefert Haben einen erfundenen Testbescheid, damit du die Seite ausprobieren kannst.
+
 ### Automatisch abrufen
 
 Mit Hersteller-ID und eingerichtetem ERiC kannst du beim Abruf „PIN verschlüsselt speichern und täglich automatisch abrufen“ wählen. Haben ruft dann sofort echt ab und speichert die PIN erst, wenn das klappt. Danach holt der Hintergrundjob das Postfach höchstens alle 20 Stunden selbst ab und bestätigt die Abholung; die 24-Stunden-Frist für die Bestätigung ist damit automatisch eingehalten.
@@ -31,15 +33,21 @@ Die PIN liegt wie das Zertifikat mit AES-256-GCM verschlüsselt in der Datenbank
 
 ### Einspruchsfrist
 
-Zu jedem Bescheid zeigt Haben unter „Einspruch bis“, bis wann du Einspruch einlegen kannst (§ 355 AO): ein Monat ab Bekanntgabe. Die Bekanntgabe gilt am vierten Tag nach dem Bescheiddatum, für Bescheide bis 2024 am dritten. Fällt die Bekanntgabe oder das Fristende auf ein Wochenende oder einen Feiertag im Bundesland, gilt der nächste Werktag. Solange die Frist läuft, steht der Bescheid in der Übersicht unter den Aufgaben, in der letzten Woche hervorgehoben. Mitteilungen haben keine Frist.
+Zu jedem Bescheid zeigt Haben unter „Einspruch bis“, bis wann du Einspruch einlegen kannst (§ 355 AO): ein Monat ab Bekanntgabe. Die Bekanntgabe gilt am vierten Tag nach dem Bescheiddatum, für Bescheide bis 2024 am dritten. Fällt die Bekanntgabe oder das Fristende auf ein Wochenende oder einen Feiertag im Bundesland, gilt der nächste Werktag. Solange die Frist läuft und du den Bescheid nicht abgehakt hast, steht er in der Übersicht unter den Aufgaben, in der letzten Woche hervorgehoben. Mitteilungen haben keine Frist.
+
+### Als geprüft abhaken
+
+Hast du einen Bescheid durchgesehen, kannst du ihn unter **Finanzamt** in der Spalte „Geprüft“ als geprüft markieren; bei der Aufgabe in der Übersicht steht dafür ein eigener Knopf. Damit verschwindet die Aufgabe des Bescheids aus den Aufgaben und aus dem Fristenkalender, ohne dass du bis zum Ablauf der Einspruchsfrist warten musst. Bei mehreren Anhängen desselben Bescheids zählt der jüngste Vermerk: Erledigt ist die Aufgabe, sobald der zuletzt vermerkte Anhang mit dem Bescheiddatum des jüngsten Bescheids geprüft ist; „Wieder offen“ auf einem dieser Anhänge holt sie zurück, etwa wenn du doch noch Einspruch einlegen willst.
+
+Der Vermerk ändert den Bescheid nicht. Er steht als eigenes Ereignis daneben, mit Zeitpunkt, und im Audit-Log mit dem Konto, das abgehakt hat. Ein abgehakter Bescheid bleibt deshalb unter Finanzamt in der Liste, und die Frist selbst läuft weiter: abgehakt heißt geprüft, nicht unanfechtbar.
+
+Ein Änderungsbescheid (§§ 164, 165, 172 ff. AO) tritt an die Stelle des Bescheids, den er ändert; der alte bleibt nur wirksam, soweit der neue ihn nicht erledigt ([§ 124 Abs. 2 AO](https://www.gesetze-im-internet.de/ao_1977/__124.html)). Ergeht er, solange die Frist des alten läuft, kannst du ihn in vollem Umfang anfechten ([§ 351 Abs. 1 AO](https://www.gesetze-im-internet.de/ao_1977/__351.html) beschränkt das nur bei Änderungen unanfechtbarer Bescheide), und seine Frist endet nie früher. Stimmen Datenart, Veranlagungszeitraum, Steuernummer und die Bezeichnungen der Dateien überein, steht deshalb nur der jüngste Bescheid unter den Aufgaben, den Fristen und im Kalender-Abo; der ältere bleibt unter Finanzamt in der Liste. Liefert ELSTER Monat oder Quartal nicht im Veranlagungszeitraum mit, unterscheidet nur die Bezeichnung zwei Zeiträume eines Jahres („Umsatzsteuer-Vorauszahlungsbescheid Januar 2025“). Ein Bescheid mit anderer Bezeichnung steht deshalb als eigene Aufgabe daneben, auch wenn er den alten ändert: lieber eine Aufgabe zu viel als eine Frist zu wenig. Aus demselben Grund legt Haben sonstige Bescheide (etwa zwei Verspätungszuschläge eines Jahres) und Bescheide ohne Veranlagungszeitraum nie zusammen.
 
 Bei Bescheiden, die nur im Postfach zum Abruf bereitgestellt werden, gilt der Bescheid am vierten Tag nach der Bereitstellung als bekannt gegeben ([§ 122a Abs. 4 Satz 1 AO](https://www.gesetze-im-internet.de/ao_1977/__122a.html)). Haben rechnet mit dem Bescheiddatum statt dem Tag der Bereitstellung; meist ist es derselbe Tag. Im Zweifel muss das Finanzamt den Zeitpunkt der Bereitstellung nachweisen (Satz 2).
 
-Der Testabruf läuft wie die Testübermittlung mit Testmerker und deiner Hersteller-ID. Ohne ERiC liefert er einen erfundenen Testbescheid, damit du die Seite ausprobieren kannst.
-
 ## Vorauszahlungen herabsetzen
 
-Das Finanzamt setzt Einkommensteuer-Vorauszahlungen (fällig 10.3., 10.6., 10.9. und 10.12.) nach dem letzten Bescheid fest. Verdienst du in diesem Jahr weniger, kannst du die Herabsetzung formlos beantragen (§ 37 Abs. 3 EStG). Ein eigenes ELSTER-Formular dafür braucht es nicht; Haben schickt den Antrag als Sonstige Nachricht.
+Das Finanzamt setzt Einkommensteuer-Vorauszahlungen (fällig 10.3., 10.6., 10.9. und 10.12.) nach dem letzten Bescheid fest. Verdienst du in diesem Jahr weniger, kannst du die Herabsetzung beantragen (§ 37 Abs. 3 EStG). Haben schickt den Antrag über ELSTER als Antrag auf Anpassung der Vorauszahlungen (Datenart AnpassungVorauszahlung, Version 22).
 
 Hast du unter [Einstellungen › Persönliche Angaben](einrichtung.md#persönliche-angaben) angegeben, dass keine Einkommensteuer-Vorauszahlungen festgesetzt sind, steht im Reiter ein Hinweis: Ein Herabsetzungsantrag ist dann gegenstandslos, es sei denn, das Finanzamt hat inzwischen wieder etwas festgesetzt. Der Antrag bleibt trotzdem ausfüllbar, weil der Haken eine Angabe von dir ist und kein Bescheid.
 
@@ -57,6 +65,8 @@ Haben füllt den Antrag mit den Zahlen aus deiner Buchhaltung und schätzt die S
 | Bisherige Vorauszahlung je Quartal | trägst du ein |
 
 Gewinn bis heute, Hochrechnung, Vorjahr und die Rechnung zur voraussichtlichen Steuer stehen zugeklappt unter **Schätzrechnung**; der Kopf nennt darunter die Vorauszahlung je Termin. Die Adresse `/finanzamt#schaetzung` öffnet sie.
+
+Im Antrag wählst du, **ab welchem Quartal** er gilt, vorbelegt mit dem Quartal des nächsten Fälligkeitstermins, oder die **nachträgliche Vorauszahlung**, dazu das **Jahr**: ELSTER nimmt das laufende, das nächste und die drei vorigen. Nach dem 10.12. ist das 1. Quartal des nächsten Jahres vorbelegt. Felder für Beträge hat der Antrag nicht; der Brief mit den Zahlen oben geht als **Begründung** mit (bis 15.000 Zeichen) und folgt Quartal, Jahr und Zahlen, bis du ihn selbst änderst. Die Zahlen sind die des laufenden Jahres, der Brief nennt es; wählst du ein anderes Jahr, weist das Feld darauf hin.
 
 ### Steuerprognose
 
@@ -76,7 +86,7 @@ Arbeitslohn, Abzüge, Lohnsteuer und ein Erstattungsüberhang stammen aus den [A
 
 Einkommensersatzleistungen wie Eltern- oder Krankengeld aus den Angaben des laufenden Jahres berücksichtigt Haben beim Progressionsvorbehalt ([§ 32b EStG](https://www.gesetze-im-internet.de/estg/__32b.html)). Bei übernommenen Vorjahresangaben lässt Haben diese Leistungen für beide Personen weg und nennt bei positiven Beträgen das Herkunftsjahr im Hinweis. In der Jahreserklärung ihres Bezugsjahres bleiben sie berücksichtigt. Erwartest du im laufenden Jahr ebenfalls Leistungen, trage sie in dessen Angaben zur Einkommensteuer ein.
 
-Die Herabsetzung wirkt ab dem nächsten Fälligkeitstermin. Die Antwort kommt als geänderter Vorauszahlungsbescheid, per Brief oder in dein ELSTER-Postfach.
+Die Antwort kommt als geänderter Vorauszahlungsbescheid, per Brief oder in dein ELSTER-Postfach.
 
 ## Freie Nachricht
 
@@ -92,4 +102,6 @@ Das Konto wählst du aus deinen Bankkonten mit IBAN, angezeigt mit Name und Zwec
 
 Jede Prüfung und Übermittlung speichert Haben mit Text, Transfer-Ticket und dem gesendeten XML; ändern oder löschen lässt sich das nicht. Ein Übertragungsprotokoll als PDF gibt es für Nachrichten nicht, das Transfer-Ticket ist der Nachweis.
 
-Für die Anschrift im Absender braucht ELSTER Straße und Hausnummer getrennt; Haben trennt die Hausnummer am Ende der Straße ab. Fehlt sie, meldet die Seite das. Sind [persönliche Angaben](einrichtung.md#persönliche-angaben) hinterlegt, geht die Nachricht unter deinem Namen und deiner Steuer-ID als natürliche Person; sonst unter dem Firmennamen.
+Für die Anschrift im Absender braucht ELSTER Straße und Hausnummer getrennt; Haben trennt die Hausnummer am Ende der Straße ab. Fehlt sie, meldet die Seite das. Die Telefonnummer aus den Firmendaten geht beim Antrag für Rückfragen mit, wenn sie ohne Leerzeichen, Klammern und „(0)“ höchstens 20 Zeichen aus Ziffern, `+`, `-` und `/` hat. Sind [persönliche Angaben](einrichtung.md#persönliche-angaben) hinterlegt, geht die Nachricht unter deinem Namen und deiner Steuer-ID als natürliche Person; sonst unter dem Firmennamen.
+
+Text, Betreff, Namen und Anschrift nimmt ELSTER nur im Zeichensatz der Datenart (Standard_E_V2: Buchstaben mit Umlauten und Akzenten, Ziffern, übliche Satzzeichen, €). Gedankenstriche und Mittelpunkte schreibt Haben als `-`, typografische Anführungszeichen als `"` und `'`, Auslassungspunkte als `...`; unsichtbare Zeichen aus kopiertem Text (weicher Trennstrich) fallen weg; jedes andere Zeichen außerhalb, etwa ein Emoji, meldet die Seite vor dem Senden. Bis Version 0.14 gingen diese Zeichen unverändert hinaus, und ERiC lehnte das XML ab, etwa wegen des Gedankenstrichs im Zeitraum des Antrags.

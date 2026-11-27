@@ -89,7 +89,7 @@ test("Formulare für Artikel und Textbausteine: Hauptaktion zuletzt", async ({ p
     ["/textbausteine", "Neuer Textbaustein"],
   ] as const) {
     await gehe(page, url);
-    await page.getByRole("button", { name }).click();
+    await page.locator(".page-head").getByRole("button", { name }).click();
     await expect(page.getByRole("form", { name })).toBeVisible();
     expect(await abweichungen(page), url).toEqual([]);
   }
@@ -142,6 +142,7 @@ test("Knopfzeilen auf den Seiten mit Formularen und Rückfragen", async ({ page 
     "/umsatzsteuer",
     "/einstellungen?bereich=email",
     "/einstellungen?bereich=bank",
+    "/bank/verbindungen",
     "/einstellungen?bereich=seiten",
     "/einstellungen?bereich=export",
   ]) {

@@ -30,7 +30,7 @@ Lieber von Hand? Entpacke das Paket auf dem Host nach `/opt/eric`, sodass `/opt/
 | Variable | `ERIC_HOME=/opt/eric` in `.env` | `ERIC_HOME=/opt/eric` in `haben.env` einkommentieren |
 | Neu starten | `docker compose up -d` | `systemctl --user daemon-reload && systemctl --user restart haben-app` |
 
-ERiC läuft nie im App-Prozess. Jede Prüfung und jede Übermittlung startet einen kurzlebigen Kindprozess, der die Bibliothek lädt. Ohne ERiC nutzt Haben einen simulierten Client; die Oberfläche zeigt dann „ERiC ist nicht eingerichtet“ an, und nichts geht an das Finanzamt.
+ERiC läuft nie im App-Prozess. Jede Prüfung und jede Übermittlung startet einen kurzlebigen Kindprozess, der die Bibliothek lädt. Ohne ERiC nutzt Haben einen simulierten Client; die Oberfläche zeigt dann „Senden ist noch nicht eingerichtet“ an, und nichts geht an das Finanzamt.
 
 ### ELSTER auf arm64
 
@@ -42,19 +42,22 @@ Das kostet Zeit: Auf einem Jetson AGX Orin dauerte ein ERiC-Aufruf emuliert rund
 
 1. **QEMU besorgen:** ein statisch gebautes `qemu-x86_64` (User-Mode) ab Version 9; mit 8.2 stürzt Bun schon beim Start ab. Debian ab 13 hat es im Paket `qemu-user` (`/usr/bin/qemu-x86_64`), ältere Systeme wie Ubuntu 24.04 nur 8.2 in `qemu-user-static`. Das Programm aus dem Debian-Paket läuft auch dort, z. B. mit `apt-get download qemu-user` in einem Container mit `debian:trixie` und `dpkg-deb -x`.
 2. **Laufzeit anlegen:** auf dem Host als root, mit derselben Version wie das App-Image. Das Skript kommt vom Tag dieser Version, damit Skript und App zusammenpassen:
-   ```sh
-   VERSION=x.y.z   # Version deines App-Images
-   curl -O https://raw.githubusercontent.com/Speicherstadt/haben/v$VERSION/deploy/eric-x86_64/einrichten.sh
-   sudo QEMU=/pfad/zu/qemu-x86_64 sh einrichten.sh $VERSION /opt/haben-x86_64
-   ```
-   Das Skript lädt das amd64-Image von Haben, entpackt es nach `/opt/haben-x86_64/root` (rund 730 MB), kopiert QEMU daneben und legt `worker.sh` an, den Befehl für `ERIC_WORKER_COMMAND`. Den lokalen Tag des Images setzt es danach zurück: Lag das Image der App schon auf dem Rechner, zeigt der Tag wieder darauf, sonst wird er entfernt. So startet die App beim nächsten Mal nicht das amd64-Image.
+
+    ```sh
+    VERSION=x.y.z   # Version deines App-Images
+    curl -O https://raw.githubusercontent.com/Speicherstadt/haben/v$VERSION/deploy/eric-x86_64/einrichten.sh
+    sudo QEMU=/pfad/zu/qemu-x86_64 sh einrichten.sh $VERSION /opt/haben-x86_64
+    ```
+
+    Das Skript lädt das amd64-Image von Haben, entpackt es nach `/opt/haben-x86_64/root` (rund 730 MB), kopiert QEMU daneben und legt `worker.sh` an, den Befehl für `ERIC_WORKER_COMMAND`. Den lokalen Tag des Images setzt es danach zurück: Lag das Image der App schon auf dem Rechner, zeigt der Tag wieder darauf, sonst wird er entfernt. So startet die App beim nächsten Mal nicht das amd64-Image.
+
 3. **In der App einbinden** und neu starten:
 
-   | | Compose | Quadlet |
-   | --- | --- | --- |
-   | Verzeichnis mounten | in `compose.override.yml` beim Dienst `app` unter `volumes` `- /opt/haben-x86_64:/opt/haben-x86_64:ro` eintragen (Beispiel in der [Beispiel-Override-Datei](installation.md#beispiel-override-datei); der [Compose-Generator](compose-generator.md) erzeugt Mount und Variable) | in `haben-app.container` die Zeile `Volume=/opt/haben-x86_64:/opt/haben-x86_64:ro` einkommentieren |
-   | Variable | `ERIC_WORKER_COMMAND=/opt/haben-x86_64/worker.sh` in `.env` | `ERIC_WORKER_COMMAND=/opt/haben-x86_64/worker.sh` in `haben.env` einkommentieren |
-   | Neu starten | `docker compose up -d` | `systemctl --user daemon-reload && systemctl --user restart haben-app` |
+    | | Compose | Quadlet |
+    | --- | --- | --- |
+    | Verzeichnis mounten | in `compose.override.yml` beim Dienst `app` unter `volumes` `- /opt/haben-x86_64:/opt/haben-x86_64:ro` eintragen (Beispiel in der [Beispiel-Override-Datei](installation.md#beispiel-override-datei); der [Compose-Generator](compose-generator.md) erzeugt Mount und Variable) | in `haben-app.container` die Zeile `Volume=/opt/haben-x86_64:/opt/haben-x86_64:ro` einkommentieren |
+    | Variable | `ERIC_WORKER_COMMAND=/opt/haben-x86_64/worker.sh` in `.env` | `ERIC_WORKER_COMMAND=/opt/haben-x86_64/worker.sh` in `haben.env` einkommentieren |
+    | Neu starten | `docker compose up -d` | `systemctl --user daemon-reload && systemctl --user restart haben-app` |
 
 4. **ERiC laden** wie oben unter [ERiC einbinden](#eric-einbinden); mit `ERIC_WORKER_COMMAND` bietet Haben den Download auch auf arm64 an.
 
@@ -168,7 +171,7 @@ Optional. Haben holt die Umsätze einmal täglich selbst über [Enable Banking](
 1. Bei Enable Banking ein Konto anlegen und im Kontrollzentrum unter **API applications** eine Anwendung registrieren.
 2. Als **Redirect URL** die Adresse `https://<deine Domain>/api/bank/callback` eintragen. Haben zeigt sie beim Verbinden auch an.
 3. Den Schlüssel im Browser erzeugen lassen. Enable Banking lädt dann `<Application ID>.pem` herunter; die Application ID steht auch in der Übersicht.
-4. Für eigene Konten genügt in der Regel der kostenlose eingeschränkte Produktionszugang: Die Anwendung wird aktiviert, indem du im Kontrollzentrum deine eigenen Konten verknüpfst, und darf danach nur diese abrufen. Die aktuellen Bedingungen stehen bei Enable Banking. Zum Ausprobieren gibt es eine Sandbox mit Testbanken.
+4. Zum Testen aktivierst du die Anwendung, indem du im Kontrollzentrum deine eigenen Konten verknüpfst; sie darf danach nur diese abrufen. Für den produktiven Abruf eigener Geschäftskonten bietet Enable Banking nach eigener Auskunft (Stand November 2026) eine bezahlte Vereinbarung zur internen Nutzung an, je Firma mit monatlicher Gebühr und einmaliger Einrichtung; mehrere Firmen deckt sie nur unter derselben Holding. Die aktuellen Bedingungen stehen bei Enable Banking. Ohne Vereinbarung bleibt der Abruf über [FinTS](#kontoabruf-über-fints) oder der Datei-Import. Zum Ausprobieren gibt es eine Sandbox mit Testbanken.
 5. Für die Produktionsumgebung verlangt Enable Banking außerdem eine **Privacy Policy URL** und eine **Terms of Service URL**. Haben bringt keine eigenen Seiten dafür mit: Die Instanz betreibst du selbst, also gehören dorthin deine Angaben, nicht die des Projekts. Trage die Datenschutzerklärung und das Impressum bzw. die AGB deiner eigenen Website ein, z. B. `https://<deine Domain>/datenschutz` und `https://<deine Domain>/impressum`. Die Adressen sollten erreichbar sein; im eingeschränkten Zugang bist du selbst der einzige Nutzer, der sie beim Zustimmen sieht.
 
 Schlüssel und ID an Haben übergeben, am einfachsten in der Oberfläche: Unter **Einstellungen › Bank** die heruntergeladene `.pem`-Datei wählen; die Application ID übernimmt Haben aus dem Dateinamen. **Prüfen und speichern** fragt bei Enable Banking die Bankliste ab und speichert Schlüssel und ID nur, wenn das klappt. Der Schlüssel liegt danach verschlüsselt in der Datenbank wie das SMTP-Passwort; im Audit-Log steht nur die Application ID.
@@ -187,13 +190,17 @@ podman secret create haben-enablebanking-key ~/Downloads/<Application ID>.pem
 systemctl --user daemon-reload && systemctl --user restart haben-app
 ```
 
-Danach erscheint unter **Bank** der Knopf **Bank verbinden**. Ablauf, Zustimmung und Dubletten stehen in [Bankimport und Abgleich](bank.md#automatischer-abruf).
+Danach bietet **Konto verbinden › Bank hinzufügen** unter **Bank** den Weg **Online-Banking über Enable Banking (PSD2)** an. Ablauf, Zustimmung und Dubletten stehen in [Bankimport und Abgleich](bank.md#automatischer-abruf).
 
 Was an Enable Banking geht: beim Verbinden die gewählte Bank und die Rückleitungsadresse, danach nur Abrufe von Umsätzen und Kontoständen der freigegebenen Konten. Die Anmeldung bei der Bank geschieht auf deren Seite; Haben sieht weder Zugangsdaten noch TAN. Zahlungen auslösen kann Haben nicht.
 
 ## PayPal-Abruf
 
-Der Abruf der PayPal-Umsätze braucht auf dem Server nichts Eigenes: keine Umgebungsvariable und kein Secret für PayPal. Die Zugangsdaten verschlüsselt Haben wie alle anderen mit dem vorhandenen Schlüssel der Installation; wechselst du ihn, musst du sie neu eintragen. Client-ID und Secret der PayPal-App trägst du in Haben ein (Einstellungen › Bank › PayPal, siehe [PayPal-Umsätze über die API](bank-zahlungsdienstleister.md#paypal-umsätze-über-die-api)); sie liegen verschlüsselt in der Datenbank. Der Server muss `api-m.paypal.com` (Sandbox: `api-m.sandbox.paypal.com`) auf Port 443 erreichen.
+Der Abruf der PayPal-Umsätze braucht auf dem Server nichts Eigenes: keine Umgebungsvariable und kein Secret für PayPal. Die Zugangsdaten verschlüsselt Haben wie alle anderen mit dem vorhandenen Schlüssel der Installation; wechselst du ihn, musst du sie neu eintragen. Client-ID und Secret der PayPal-App trägst du in Haben ein (Bank › Konto verbinden › Zahlungsdienstleister hinzufügen, siehe [PayPal-Umsätze über die API](bank-zahlungsdienstleister.md#paypal-umsätze-über-die-api)); sie liegen verschlüsselt in der Datenbank. Der Server muss `api-m.paypal.com` (Sandbox: `api-m.sandbox.paypal.com`) auf Port 443 erreichen.
+
+## Stripe-Abruf
+
+Wie bei PayPal braucht der Abruf der Stripe-Umsätze keine Umgebungsvariable und kein Secret auf dem Server. Den API-Schlüssel trägst du in Haben ein (Bank › Konto verbinden › Zahlungsdienstleister hinzufügen, siehe [Stripe-Umsätze über die API](bank-zahlungsdienstleister.md#stripe-umsätze-über-die-api)); er liegt verschlüsselt in der Datenbank. Der Server muss `api.stripe.com` auf Port 443 erreichen.
 
 ## Kontoabruf über FinTS
 
@@ -215,7 +222,7 @@ FinTS-Zugang gibt es nur für Software, die bei der Deutschen Kreditwirtschaft (
     systemctl --user restart haben-app
     ```
 
-3. Unter **Einstellungen › Bank** steht dann bei **Kontoabruf über FinTS** „Eingerichtet“ (die Nummer zeigt Haben nicht), unter **Bank** der Knopf **Über FinTS verbinden**. Ablauf, TAN und Fehler stehen in [Abruf über FinTS](bank-fints.md).
+3. Unter **Einstellungen › Bank** steht dann bei **Kontoabruf über FinTS** „Eingerichtet“ (die Nummer zeigt Haben nicht), unter **Bank** bietet **Konto verbinden › Bank hinzufügen** den Weg **FinTS (PIN/TAN)** an. Ablauf, TAN und Fehler stehen in [Abruf über FinTS](bank-fints.md).
 
 > [!NOTE]
 > Die Nummer gilt nicht sofort bei allen Banken. Die DK gibt neue Registrierungen gesammelt an die Institute weiter, derzeit etwa einmal pro Woche, und wann eine Bank sie übernimmt, entscheidet die Bank: Das dauert Tage bis Wochen ([Hinweis der DK in #654](https://github.com/Speicherstadt/haben/issues/654#issuecomment-6915898298)). Bis dahin lehnt die Bank die Anmeldung ab, mit „FinTS-Produkt ist nicht registriert“ (9078 in den [Rückmeldungscodes der DK](https://www.fints.org/de/spezifikation)) oder, wie eine Bank im [Test zu #1289](https://github.com/Speicherstadt/haben/pull/1289), mit „Das Kundenprodukt wird nicht unterstützt.“ (9952); Haben weist bei beiden darauf hin. Stimmt die Nummer in `FINTS_PRODUKT_ID`, später noch einmal versuchen.

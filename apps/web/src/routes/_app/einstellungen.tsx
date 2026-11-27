@@ -1,15 +1,12 @@
 import { currentFilingPeriod, isKapitalgesellschaft } from "@haben/core";
-import { redirect, createFileRoute } from "@tanstack/react-router";
+import { Link, redirect, createFileRoute } from "@tanstack/react-router";
 import { BackupCard } from "../../components/BackupCard.tsx";
+import { BankverbindungenCard } from "../../components/BankverbindungenCard.tsx";
 import { BereicheCard } from "../../components/BereicheCard.tsx";
 import { ArchiveSearchCard } from "../../components/ArchiveSearchCard.tsx";
 import { ArchiveTargetCard } from "../../components/ArchiveTargetCard.tsx";
 import { DatevCard } from "../../components/DatevCard.tsx";
-import { EtsyPaymentsCard } from "../../components/EtsyPaymentsCard.tsx";
-import { PayPalPaymentsCard } from "../../components/PayPalPaymentsCard.tsx";
-import { StripePaymentsCard } from "../../components/StripePaymentsCard.tsx";
 import { KontoabrufKarten } from "../../components/FintsCard.tsx";
-import { StoreReportsCard } from "../../components/StoreReportsCard.tsx";
 import { ExchangeRatesCard } from "../../components/ExchangeRatesCard.tsx";
 import { ExportCard } from "../../components/ExportCard.tsx";
 import { SettingsExportCard } from "../../components/SettingsExportCard.tsx";
@@ -36,16 +33,15 @@ import { EigeneSeitenCard } from "../../components/EigeneSeitenCard.tsx";
 import { OwnAccountsCard } from "../../components/OwnAccountsCard.tsx";
 import { McpCard } from "../../components/McpCard.tsx";
 import { ExtractionCard } from "../../components/ExtractionCard.tsx";
+import { ExtractionLimitsCard } from "../../components/ExtractionLimitsCard.tsx";
 import { PasskeysCard } from "../../components/PasskeysCard.tsx";
 import { PasswordCard } from "../../components/PasswordCard.tsx";
 import { SsoZugaengeCard } from "../../components/SsoZugaengeCard.tsx";
 import { ZugaengeCard } from "../../components/ZugaengeCard.tsx";
 import { getBackupStatus } from "../../server/functions/backup.ts";
 import { getEnableBankingSettings } from "../../server/functions/bank.ts";
-import { getStoreConnections } from "../../server/functions/stores.ts";
-import { getEtsySettings } from "../../server/functions/etsy.ts";
-import { getPayPalSettings } from "../../server/functions/paypal.ts";
-import { getStripeSettings } from "../../server/functions/stripe.ts";
+import { getPspSettings } from "../../server/functions/zahlungsdienstleister.ts";
+import { anbieterAufzaehlung } from "../../lib/zahlungsdienstleister-text.ts";
 import { SETTINGS_AREAS, settingsAreas, type SettingsArea } from "../../lib/settings-areas.ts";
 import { getCompany, getExchangeRates } from "../../server/functions/company.ts";
 import reportStyles from "../../styles/auswertungen.css?url";
@@ -67,19 +63,14 @@ import { getOwnAccounts } from "../../server/functions/eigene-konten.ts";
 import { SettingsHead, SettingsNav } from "../../components/SettingsNav.tsx";
 import { UnitsCard } from "../../components/UnitsCard.tsx";
 import { getUnits } from "../../server/functions/units.ts";
+import { getBankverbindungen } from "../../server/functions/bankverbindungen.ts";
 import { TaxpayerForm } from "./-einstellungen-steuerpflichtige.tsx";
 import { CertificateForm, EricCard } from "./-einstellungen-elster.tsx";
 
-/** Anbindungen unter Bank: Kontoabruf über Enable Banking, Finanzberichte der Stores, Etsy Payments, PayPal und Stripe */
+/** Anbindungen unter Bank: Zugang der Installation zu Enable Banking und FinTS; die Verbindungen selbst stehen unter Geld › Verbindungen */
 async function loadBankConnections() {
-  const [enableBanking, stores, etsy, paypal, stripe] = await Promise.all([
-    getEnableBankingSettings(),
-    getStoreConnections(),
-    getEtsySettings(),
-    getPayPalSettings(),
-    getStripeSettings(),
-  ]);
-  return { enableBanking, stores, etsy, paypal, stripe };
+  const [enableBanking, zahlungsdienstleister] = await Promise.all([getEnableBankingSettings(), getPspSettings()]);
+  return { enableBanking, zahlungsdienstleister };
 }
 
 /** Beleggestaltung: Logo, Briefpapier, Gestaltung, Layouts und Vorschau der Fußzeile */
@@ -122,6 +113,7 @@ export const Route = createFileRoute("/_app/einstellungen")({
       quoteDefaultAttachments,
       ownAccounts,
       units,
+      bankverbindungen,
     ] = await Promise.all([
       getCompany(),
       getVatPeriod({ data: currentFilingPeriod(new Date()) }),
@@ -144,6 +136,7 @@ export const Route = createFileRoute("/_app/einstellungen")({
       getQuoteDefaultAttachments(),
       getOwnAccounts(),
       getUnits(),
+      getBankverbindungen(),
     ]);
     return {
       ...company,
@@ -168,6 +161,7 @@ export const Route = createFileRoute("/_app/einstellungen")({
       quoteDefaultAttachments,
       ownAccounts,
       units,
+      bankverbindungen,
     };
   },
   head: () => ({ meta: [{ title: "Einstellungen · Haben" }], links: [{ rel: "stylesheet", href: reportStyles }] }),
@@ -197,16 +191,14 @@ function SettingsPage() {
     mcp,
     rates,
     enableBanking,
-    stores,
-    etsy,
-    paypal,
-    stripe,
+    zahlungsdienstleister,
     customPages,
     zugaenge,
     extraction,
     quoteDefaultAttachments,
     ownAccounts,
     units,
+    bankverbindungen,
     footerPreview,
     ablage,
     neueInstanz,
@@ -229,6 +221,7 @@ function SettingsPage() {
           {bereich === "firma" && (
             <>
               <CompanyForm />
+              <BankverbindungenCard bankverbindungen={bankverbindungen} />
               <NavMarkCard color={company.navColor} logo={company.navLogo} logoSha256={logo?.sha256 ?? null} />
             </>
           )}
@@ -277,10 +270,13 @@ function SettingsPage() {
           {bereich === "bank" && (
             <>
               <KontoabrufKarten data={enableBanking} />
-              <StoreReportsCard connections={stores.connections} contacts={stores.contacts} />
-              <EtsyPaymentsCard data={etsy} />
-              <PayPalPaymentsCard data={paypal} />
-              <StripePaymentsCard data={stripe} />
+              <section className="card" aria-labelledby="psp-heading">
+                <h2 id="psp-heading">Zahlungsdienstleister und Stores</h2>
+                <p className="small muted" style={{ margin: 0 }}>
+                  {anbieterAufzaehlung(zahlungsdienstleister.anbieter.map((a) => a.name))}, Etsy Payments und die Berichte von Google Play und App Store
+                  verbindest du unter <Link to="/bank/verbindungen">Geld › Verbindungen</Link>.
+                </p>
+              </section>
             </>
           )}
           {bereich === "zugaenge" && zugaenge.mode === "sso" && <SsoZugaengeCard accounts={zugaenge.ssoAccounts} providerName={oidc.name} />}
@@ -295,6 +291,7 @@ function SettingsPage() {
             <>
               <McpCard data={mcp} />
               <ExtractionCard settings={extraction} />
+              {extraction.provider !== null && <ExtractionLimitsCard limits={extraction.limits} />}
             </>
           )}
           {bereich === "konten" && <OwnAccountsCard overview={ownAccounts} />}

@@ -4,7 +4,17 @@ import postgres from "postgres";
 import { day } from "./daten.ts";
 import { type Durchlauf, databaseUrlFuer } from "./durchlaeufe.ts";
 import { LAPTOP, sichtbar, zumEnde } from "./kopfzeile.ts";
-import { axeVerstoesse, bestaetigen, faktenZeigen, durchlaufSeite, gehe, kundeWaehlen, ohneAxeVerstoesse, rechnungFestschreiben } from "./einrichtung.ts";
+import {
+  axeVerstoesse,
+  kontoVerbinden,
+  bestaetigen,
+  faktenZeigen,
+  durchlaufSeite,
+  gehe,
+  kundeWaehlen,
+  ohneAxeVerstoesse,
+  rechnungFestschreiben,
+} from "./einrichtung.ts";
 import { abzugEinspielen } from "./abzug.ts";
 
 /**
@@ -290,14 +300,27 @@ test("Entwurf aus dem stehenden Kopf speichern: die Bestätigung erscheint im Fe
   await page.setViewportSize(LAPTOP);
   await page.goto("/rechnungen/neu", { waitUntil: "networkidle" });
   await kundeWaehlen(page);
-  // Leere Position: „Festschreiben“ fragt nicht nach, sondern nennt unter der Position, was fehlt (DESIGN.md, Gesperrte Knöpfe)
-  await page.locator(".main > .page-head").getByRole("button", { name: "Festschreiben" }).click();
+  // Leere Position: „Festschreiben“ fragt nicht nach, sondern nennt unter der Position je Feld, was fehlt (DESIGN.md, Gesperrte
+  // Knöpfe); der Fokus geht ins erste Feld mit Fehler (#1277)
+  const festschreiben = page.locator(".main > .page-head").getByRole("button", { name: "Festschreiben" });
+  const menge = page.getByLabel("Menge Position 1");
+  const preis = page.getByLabel(/Einzelpreis Position 1/);
+  await festschreiben.click();
   await expect(page.getByLabel("Beschreibung Position 1")).toBeFocused();
-  await expect(page.getByLabel("Beschreibung Position 1")).toHaveAccessibleDescription("Trag die Beschreibung und den Einzelpreis ein.");
+  await expect(page.getByLabel("Beschreibung Position 1")).toHaveAccessibleDescription("Trag die Beschreibung ein.");
+  await expect(preis).toHaveAttribute("aria-invalid", "true");
+  await expect(preis).toHaveAccessibleDescription("Trag den Einzelpreis ein, etwa 95,00.");
+  await expect(menge).not.toHaveAttribute("aria-invalid", "true");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.getByLabel("Beschreibung Position 1").fill("Beratung");
-  await page.getByLabel("Menge Position 1").fill("1");
-  await page.getByLabel(/Einzelpreis Position 1/).fill("100");
+  await menge.fill("0");
+  await festschreiben.click();
+  await expect(menge).toBeFocused();
+  await expect(menge).toHaveAccessibleDescription("Trag eine Menge über 0 ein, etwa 2 oder 1,5.");
+  await expect(page.getByLabel("Beschreibung Position 1")).not.toHaveAttribute("aria-invalid", "true");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await menge.fill("1");
+  await preis.fill("100");
   const speichern = page.locator(".main > .page-head").getByRole("button", { name: "Entwurf speichern" });
   await speichern.click();
   await expect(page).toHaveURL(/\/rechnungen\/[0-9a-f-]{36}/);
@@ -407,12 +430,13 @@ test("Lastschriftdatei: fällige Rechnung wählen, pain.008 herunterladen, danac
   // Ohne Bankkonto gibt es kein Gläubigerkonto, auf dem der Betrag eingeht
   await expect(page.getByText(/braucht Haben das Konto, auf dem der Betrag eingeht/)).toBeVisible();
   await go("/bank");
-  await page.getByRole("button", { name: "Konto hinzufügen" }).click();
+  await kontoVerbinden(page, "Konto ohne Abruf anlegen");
   const kontoForm = page.locator("form").filter({ has: page.getByRole("button", { name: "Konto anlegen" }) });
   await kontoForm.getByRole("textbox", { name: "Name" }).fill("Girokonto");
   await kontoForm.getByRole("textbox", { name: "IBAN" }).fill("DE89 3704 0044 0532 0130 00");
   await kontoForm.getByRole("button", { name: "Konto anlegen" }).click();
-  await expect(page.getByRole("combobox", { name: "Konto" }).locator("option", { hasText: "Girokonto" })).toHaveCount(1);
+  // Das neue Konto ist gewählt: seine Karte steht in der Leiste (#1951)
+  await expect(page.getByRole("navigation", { name: "Konten" }).getByRole("link", { name: /^Girokonto/ })).toHaveAttribute("aria-current", "page");
 
   await go("/lastschriften");
   const form = page.getByRole("form", { name: "SEPA-Lastschrift erzeugen" });
@@ -654,6 +678,15 @@ test("Rechnungsdatum vor der letzten festgeschriebenen Rechnung: Warnung beim Fe
   await expect(dialog.getByRole("status")).toContainText("01.10.2026");
   await bestaetigen(page, "Festschreiben");
   await expect(page.getByText("Festgeschrieben", { exact: true })).toBeVisible();
+
+  // Rückweg zur Buchung (#1855): unter Angaben „Im Journal“, die Zeile im Journal hervorgehoben
+  await page
+    .locator("section[aria-labelledby=facts-heading]")
+    .getByRole("link", { name: /^Buchung vom / })
+    .click();
+  await page.waitForURL(/\/buchungen\?.*#buchung-/);
+  await expect(page.locator('tr[aria-current="true"]')).toContainText("Rechnung");
+  await expect(page.locator('tr[aria-current="true"]')).toBeFocused();
 });
 
 test("Seiten mit den Daten dieses Abschnitts ohne axe-Verstöße", async () => {

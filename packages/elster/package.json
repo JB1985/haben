@@ -7,7 +7,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./felder": "./src/felder.ts",
-    "./euer-felder": "./src/euer-felder.ts"
+    "./euer-felder": "./src/euer-felder.ts",
+    "./idnr": "./src/idnr.ts",
+    "./vorauszahlung-zeitraum": "./src/vorauszahlung-zeitraum.ts"
   },
   "scripts": {
     "typecheck": "bun --bun tsc -p ."

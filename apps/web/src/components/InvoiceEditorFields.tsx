@@ -1,17 +1,19 @@
 import { formatEuro, skontoFristen, type PriceMode } from "@haben/core";
 import { formatDate } from "../lib/format.ts";
+import { BankverbindungField } from "./BankverbindungField.tsx";
 import { ContactCombobox } from "./ContactCombobox.tsx";
 import { ContactPersonField } from "./ContactPersonField.tsx";
 import { Field } from "./Field.tsx";
 import { OutgoingTaxFields } from "./OutgoingTaxFields.tsx";
 import { PaymentMethodFields, PaymentTermField } from "./PaymentMethodFields.tsx";
 import { SkontoFields } from "./SkontoFields.tsx";
+import { VatTerritoryHint } from "./VatTerritoryHint.tsx";
 import type { InvoiceEditorModel } from "./use-invoice-editor.ts";
 
 // Felder der Karte „Rechnungsdaten“ bzw. „Angebotsdaten“ (InvoiceEditorDetails): Kunde, Daten und Zahlung, Steuer und Preise
 
 /** Kunde, Ansprechpartner und bei Abschlag oder Schlussrechnung das Angebot */
-export function InvoiceCustomerFields({ editor }: { editor: InvoiceEditorModel }) {
+export function InvoiceCustomerFields({ editor, territoryDescription }: { editor: InvoiceEditorModel; territoryDescription: string | undefined }) {
   const {
     chooseContact,
     chooseQuote,
@@ -31,7 +33,7 @@ export function InvoiceCustomerFields({ editor }: { editor: InvoiceEditorModel }
   } = editor;
   return (
     <>
-      <Field label="Kunde" error={error("contact")} style={{ gridColumn: "1 / -1" }}>
+      <Field label="Kunde" error={error("contact")} describedBy={territoryDescription} style={{ gridColumn: "1 / -1" }}>
         {(control) => (
           <ContactCombobox
             {...control}
@@ -148,6 +150,7 @@ export function InvoiceDatePaymentFields({ editor }: { editor: InvoiceEditorMode
           }}
         />
       )}
+      <InvoiceBankverbindungField editor={editor} />
       {skontoAllowed && (
         <SkontoFields
           id="invoice-skonto"
@@ -164,10 +167,35 @@ export function InvoiceDatePaymentFields({ editor }: { editor: InvoiceEditorMode
   );
 }
 
+/**
+ * Zahlungskonto (#1887) im Angebot und in der Rechnung mit Überweisung; bei Lastschrift gilt das Gläubigerkonto aus den
+ * Firmendaten. Ohne weitere Zahlungskonten steht das Feld nicht da (BankverbindungField).
+ */
+function InvoiceBankverbindungField({ editor }: { editor: InvoiceEditorModel }) {
+  const { bankverbindungen, bankverbindungId, editable, kind, paymentMethod, quote, setBankverbindungId, standardIban, touch } = editor;
+  if (!quote && !(kind === "rechnung" && paymentMethod === "ueberweisung")) return null;
+  return (
+    <BankverbindungField
+      label="Zahlungskonto"
+      bankverbindungen={bankverbindungen}
+      standardIban={standardIban}
+      value={bankverbindungId}
+      disabled={!editable}
+      hint={
+        quote
+          ? "Dein Konto für die Zahlung des Kunden; geht in die Rechnung aus dem Angebot über. Vorgabe ist das bevorzugte Zahlungskonto des Kunden."
+          : "Dein Konto, auf das der Kunde zahlt: auf der Rechnung, im GiroCode und in der E-Rechnung (BT-84). Vorgabe ist das bevorzugte Zahlungskonto des Kunden."
+      }
+      onChange={touch(setBankverbindungId)}
+    />
+  );
+}
+
 /** Umsatzsteuerliche Behandlung und Netto- oder Bruttopreise */
-export function InvoiceTaxFields({ editor }: { editor: InvoiceEditorModel }) {
+export function InvoiceTaxFields({ editor, territoryDescription }: { editor: InvoiceEditorModel; territoryDescription: string | undefined }) {
   const {
     chooseTreatment,
+    contact,
     editable,
     error,
     exemptionReason,
@@ -184,7 +212,9 @@ export function InvoiceTaxFields({ editor }: { editor: InvoiceEditorModel }) {
   } = editor;
   return (
     <>
+      {territoryDescription && <VatTerritoryHint id={territoryDescription} country={contact?.land} postalCode={contact?.plz} />}
       <OutgoingTaxFields
+        describedBy={territoryDescription}
         treatment={taxTreatment}
         details={taxDetails}
         exemptionReason={exemptionReason}

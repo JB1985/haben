@@ -9,6 +9,7 @@ import { inWeitereAngaben, isEuVatId } from "../../../components/WeitereAngaben.
 import { aendereBetragszeile } from "../../../lib/betragszeile.ts";
 import { fehlerFelder } from "../../../lib/format.ts";
 import { useAction } from "../../../lib/use-action.ts";
+import { useFokusNachSperre } from "../../../lib/use-fokus-nach-sperre.ts";
 import { useSubmitCheck } from "../../../lib/use-submit-check.ts";
 import { saveDocument } from "../../../server/functions/documents.ts";
 import { type DocumentFields, useDocumentFields, useDocumentRows } from "./-beleg-felder.ts";
@@ -24,7 +25,8 @@ export function useDocumentForm({ data, inhaber, onDirtyChange }: { data: Detail
   const locked = doc.status === "gebucht";
   // Die Steuerberatung sieht den Beleg wie einen gebuchten: alle Felder gesperrt, keine Knöpfe
   const readOnly = locked || !inhaber;
-  const running = doc.extractionStatus === "laeuft";
+  // Wartet der Beleg auf die KI-Auslesung (#1735), füllen sich die Felder wie beim Auslesen gleich von selbst
+  const running = doc.extractionStatus === "laeuft" || doc.extractionStatus === "wartet";
   // Alte Entwürfe können noch manuell eingegebene Steuer enthalten; festgeschriebene Beträge bleiben unverändert.
   const calculateInitialTax = !readOnly && !running && Boolean(doc.reverseCharge);
 
@@ -32,6 +34,11 @@ export function useDocumentForm({ data, inhaber, onDirtyChange }: { data: Detail
   const rowState = useDocumentRows(data, calculateInitialTax);
   const { rows, splitRows, splitting, dirty, setDirty } = rowState;
   const { busy, notice, run } = useAction();
+  // Gesperrt auch, solange gespeichert, gebucht oder neu ausgelesen wird: Danach baut die Seite das Formular mit dem neuen
+  // `updatedAt` im `key` neu auf, und was man bis dahin tippt, ginge verloren (#1824). Nach einem Fehler steht der Fokus
+  // wieder im Feld
+  const fieldsDisabled = readOnly || running || busy;
+  useFokusNachSperre(busy);
 
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
 
@@ -59,6 +66,7 @@ export function useDocumentForm({ data, inhaber, onDirtyChange }: { data: Detail
     locked,
     readOnly,
     running,
+    fieldsDisabled,
     ...fields,
     ...rowState,
     busy,

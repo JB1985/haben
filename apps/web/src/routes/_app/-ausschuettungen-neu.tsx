@@ -1,12 +1,15 @@
-import { formatEuro, parseEuro } from "@haben/core";
+import { formatEuro, formatPercent, parseEuro } from "@haben/core";
 import { useRouter } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useState, type FormEvent } from "react";
 import { NoticeBanner } from "../../components/NoticeBanner.tsx";
 import { formatDate } from "../../lib/format.ts";
 import { useAction } from "../../lib/use-action.ts";
+import { useSubmitCheck } from "../../lib/use-submit-check.ts";
+import { ausschuettungFehler } from "./-ausschuettung-pruefung.ts";
 import { createAusschuettungFn, previewAusschuettung } from "../../server/functions/ausschuettung.ts";
 import { Field } from "../../components/Field.tsx";
+import { Icon } from "../../components/Icon.tsx";
 
 export type Vorschlag = Awaited<ReturnType<typeof previewAusschuettung>>;
 
@@ -16,14 +19,31 @@ export function faelligkeit(zufluss: string): string {
   return m === 12 ? `${y + 1}-01-10` : `${y}-${String(m + 1).padStart(2, "0")}-10`;
 }
 
+type Empfaenger = Vorschlag["empfaenger"][number];
+
+/**
+ * Maßstab der Verteilung je Empfänger (#1812): die Beteiligung in Euro (§ 29 Abs. 3 Satz 1 GmbHG, #1286). Ausschüttungen von
+ * vor #1812 haben nur den Anteil in Prozent gespeichert (bis #1286 auch der Maßstab); sie zeigen weiter ihn.
+ */
+function massstab(empfaenger: readonly Empfaenger[]) {
+  const inEuro = empfaenger.every((e) => e.beteiligung !== undefined);
+  return inEuro
+    ? { label: "Beteiligung", wert: (e: Empfaenger) => e.beteiligung ?? 0, format: formatEuro }
+    : { label: "Anteil", wert: (e: Empfaenger) => e.anteil, format: formatPercent };
+}
+
 export function EmpfaengerTabelle({ empfaenger }: { empfaenger: Vorschlag["empfaenger"] }) {
-  const summe = (f: (e: Vorschlag["empfaenger"][number]) => number) => empfaenger.reduce((s, e) => s + f(e), 0);
+  const summe = (f: (e: Empfaenger) => number) => empfaenger.reduce((s, e) => s + f(e), 0);
   const zeilen = [...empfaenger, null];
+  const m = massstab(empfaenger);
   return (
     <table className="report-table stack-table">
       <thead>
         <tr>
           <th scope="col">Gesellschafter</th>
+          <th scope="col" className="num">
+            {m.label}
+          </th>
           <th scope="col" className="num">
             Brutto
           </th>
@@ -47,7 +67,10 @@ export function EmpfaengerTabelle({ empfaenger }: { empfaenger: Vorschlag["empfa
       <tbody>
         {zeilen.map((e) => (
           <tr key={e?.name ?? "summe"} style={e ? undefined : { fontWeight: 600 }}>
-            <th scope="row">{e ? `${e.name} (${(e.anteil / 100).toLocaleString("de-DE")} %)` : "Summe"}</th>
+            <th scope="row">{e ? e.name : "Summe"}</th>
+            <td className="num" data-label={m.label}>
+              {m.format(e ? m.wert(e) : summe(m.wert))}
+            </td>
             <td className="num" data-label="Brutto">
               {formatEuro(e ? e.brutto : summe((x) => x.brutto))}
             </td>
@@ -73,6 +96,30 @@ export function EmpfaengerTabelle({ empfaenger }: { empfaenger: Vorschlag["empfa
   );
 }
 
+/**
+ * Über „Beschluss buchen“: Gründe (issues) sperren den Knopf und stehen im Ton Warnung mit Symbol alert, Hinweise
+ * sperren nicht und stehen als banner-info mit info, damit man sieht, welcher Banner den Knopf sperrt, auch ohne
+ * Farbe (DESIGN.md, Gesperrte Knöpfe)
+ */
+export function VorschlagMeldungen({ issues, hinweise }: Pick<Vorschlag, "issues" | "hinweise">) {
+  return (
+    <>
+      {issues.map((text) => (
+        <div key={text} className="banner" role="status">
+          <Icon name="alert" />
+          <span>{text}</span>
+        </div>
+      ))}
+      {hinweise.map((text) => (
+        <div key={text} className="banner banner-info" role="status">
+          <Icon name="info" />
+          <span>{text}</span>
+        </div>
+      ))}
+    </>
+  );
+}
+
 /** Eingaben für Vorschau und Anlegen, null solange Beschluss, Geschäftsjahr oder Betrag fehlen */
 function eingabe(beschluss: string, auszahlungstag: string, geschaeftsjahr: string, betrag: string) {
   const brutto = parseEuro(betrag);
@@ -84,7 +131,7 @@ export function NeueAusschuettung() {
   const router = useRouter();
   const preview = useServerFn(previewAusschuettung);
   const create = useServerFn(createAusschuettungFn);
-  const { busy, notice, setNotice, run } = useAction();
+  const { busy, notice, run } = useAction();
   const [beschluss, setBeschluss] = useState("");
   const [auszahlungstag, setAuszahlungstag] = useState("");
   const [geschaeftsjahr, setGeschaeftsjahr] = useState("");
@@ -93,14 +140,13 @@ export function NeueAusschuettung() {
   const [betrag, setBetrag] = useState("");
   const [vorschlag, setVorschlag] = useState<Vorschlag | null>(null);
   const input = () => eingabe(beschluss, auszahlungstag, geschaeftsjahr, betrag);
+  // Je Feld eine Meldung statt eines Satzes für alle (#1277, DESIGN.md, Gesperrte Knöpfe)
+  const pruefung = useSubmitCheck(ausschuettungFehler({ beschluss, auszahlungstag, geschaeftsjahr, betrag }));
 
   function berechnen(event: FormEvent) {
     event.preventDefault();
     const data = input();
-    if (!data) {
-      setNotice({ tone: "danger", text: "Datum des Beschlusses, Geschäftsjahr und Betrag eingeben." });
-      return;
-    }
+    if (!pruefung.check() || !data) return;
     void run(async () => setVorschlag(await preview({ data })));
   }
 
@@ -109,9 +155,9 @@ export function NeueAusschuettung() {
       <h2 id="neu-heading" style={{ marginTop: 0 }}>
         Gewinnverwendungsbeschluss buchen
       </h2>
-      <form onSubmit={berechnen} aria-label="Neue Ausschüttung" className="stack" style={{ gap: 12 }}>
+      <form ref={pruefung.form} noValidate onSubmit={berechnen} aria-label="Neue Ausschüttung" className="stack" style={{ gap: 12 }}>
         <div className="form-row cols-2">
-          <Field label="Datum des Beschlusses">
+          <Field label="Datum des Beschlusses" error={pruefung.error("beschluss")}>
             {(control) => (
               <input
                 {...control}
@@ -127,7 +173,7 @@ export function NeueAusschuettung() {
               />
             )}
           </Field>
-          <Field label="Auszahlungstag laut Beschluss (optional)">
+          <Field label="Auszahlungstag laut Beschluss (optional)" error={pruefung.error("auszahlungstag")}>
             {(control) => (
               <input
                 {...control}
@@ -140,7 +186,7 @@ export function NeueAusschuettung() {
               />
             )}
           </Field>
-          <Field label="Geschäftsjahr, dessen Gewinn ausgeschüttet wird">
+          <Field label="Geschäftsjahr, dessen Gewinn ausgeschüttet wird" error={pruefung.error("geschaeftsjahr")}>
             {(control) => (
               <input
                 {...control}
@@ -156,7 +202,7 @@ export function NeueAusschuettung() {
               />
             )}
           </Field>
-          <Field label="Ausschüttung brutto">
+          <Field label="Ausschüttung brutto" error={pruefung.error("betrag")}>
             {(control) => (
               <input
                 {...control}
@@ -186,11 +232,7 @@ export function NeueAusschuettung() {
             {vorschlag.ausEinlagekonto > 0 ? `; ${formatEuro(vorschlag.ausEinlagekonto)} gehen ohne Steuerabzug aus dem Einlagekonto` : ""}.
           </p>
           <EmpfaengerTabelle empfaenger={vorschlag.empfaenger} />
-          {vorschlag.issues.map((text) => (
-            <div key={text} className="banner" role="status">
-              {text}
-            </div>
-          ))}
+          <VorschlagMeldungen issues={vorschlag.issues} hinweise={vorschlag.hinweise} />
           <div className="actions">
             <button
               type="button"

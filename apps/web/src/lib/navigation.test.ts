@@ -42,6 +42,16 @@ describe("navLinkSichtbar mit ausgeblendeten Bereichen", () => {
   it("ignoriert Unbekanntes aus älteren Ständen", () => {
     expect(navLinkSichtbar({ to: "/rechnungen" }, { gesellschaft: false, hatMitarbeiter: false, ausgeblendet: ["rechnungen"] })).toBe(true);
   });
+
+  it("lässt mit „Rechnungen schreiben“ und „Mahnwesen“ die Rechnungen im Menü, Artikel, Zeiteinträge und Textbausteine fallen weg", () => {
+    const kontext = {
+      gesellschaft: false,
+      hatMitarbeiter: false,
+      ausgeblendet: ["rechnungserstellung", "mahnwesen", "artikel", "zeiteintraege", "textbausteine"],
+    };
+    expect(navLinkSichtbar({ to: "/rechnungen" }, kontext)).toBe(true);
+    for (const to of ["/artikel", "/leistungen", "/textbausteine"]) expect(navLinkSichtbar({ to }, kontext)).toBe(false);
+  });
 });
 
 describe("BEREICHE", () => {
@@ -186,5 +196,42 @@ describe("Symbole der Arbeitsbereiche", () => {
       const linkSymbole = new Set(gruppen.flatMap((gruppe) => gruppe.links.map((link) => link.icon)));
       expect(gruppenSymbole.filter((symbol) => linkSymbole.has(symbol))).toEqual([]);
     }
+  });
+});
+
+// Gruppen nach Aufgabe (#1253): Der Satz unter dem Namen trennt „Ausgaben“ von „Geld“ und „Steuern“ von „Buchhaltung“,
+// eingeklappt im Flyout und in der Schnellsuche
+describe("Hinweise der Arbeitsbereiche", () => {
+  // Ohne eigenen Doppelpunkt, denn die Schnellsuche setzt „Gruppe: Satz“ davor
+  it("hat jede Gruppe mit einem eigenen Satz in Klartext, eine Zeile ohne Klammern und Doppelpunkt", () => {
+    for (const gruppen of [NAV_GROUPS, STEUERBERATUNG_NAV]) {
+      for (const gruppe of gruppen) expect(gruppe.hinweis, gruppe.label).toMatch(/^[^():\n]{10,}$/);
+      const saetze = gruppen.map((gruppe) => gruppe.hinweis);
+      expect(new Set(saetze).size).toBe(saetze.length);
+    }
+  });
+
+  it("nennt der Satz einer Gruppe keine Seite einer anderen Gruppe", () => {
+    for (const gruppe of NAV_GROUPS)
+      for (const fremd of NAV_GROUPS.filter((andere) => andere !== gruppe).flatMap((andere) => andere.links))
+        if (!gruppe.links.some((link) => link.label === fremd.label))
+          expect(gruppe.hinweis, `${gruppe.label} nennt ${fremd.label}`).not.toMatch(new RegExp(`(^|[^\\p{L}])${fremd.label}([^\\p{L}]|$)`, "iu"));
+  });
+
+  it("trägt jede Seite der Schnellsuche den Satz ihrer Gruppe, Übersicht und Einstellungen keinen", () => {
+    const seiten = sichtbareNavSeiten({ inhaber: true, gesellschaft: false, hatMitarbeiter: true, eigeneSeiten: [] });
+    for (const gruppe of NAV_GROUPS)
+      for (const seite of seiten.filter((s) => s.group === gruppe.label)) {
+        expect(seite.hinweis, seite.label).toBeTruthy();
+        expect(seite.hinweis, seite.label).toBe(gruppe.hinweis);
+      }
+    for (const seite of seiten.filter((s) => ["Navigation", "Konto", "Einstellungen"].includes(s.group))) expect(seite.hinweis, seite.label).toBeUndefined();
+  });
+
+  it("gilt der Satz der Steuerberatung für ihre Seiten", () => {
+    const stb = sichtbareNavSeiten({ inhaber: false, gesellschaft: false, hatMitarbeiter: false, eigeneSeiten: [] });
+    const belege = stb.find((s) => s.to === "/belege");
+    expect(belege?.hinweis).toBeTruthy();
+    expect(belege?.hinweis).toBe(STEUERBERATUNG_NAV[0]?.hinweis);
   });
 });

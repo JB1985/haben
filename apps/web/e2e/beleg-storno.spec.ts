@@ -113,6 +113,13 @@ test("Beleg speichern, dann „Bestätigen und buchen“: der Dialog bleibt nach
 test("Bankzuordnung im Stornodialog bestätigen und zusammen mit dem Beleg zurücknehmen", async () => {
   await page.goto(`/belege/${documentId}`);
   await expect(page.locator(".page-head").getByText("Gebucht", { exact: true })).toBeVisible();
+  // Rückweg zur Buchung (#1855): ins Journal des Monats, die Zeile hervorgehoben und mit dem Fokus
+  await page.getByRole("link", { name: /^Buchung vom / }).click();
+  await page.waitForURL(/\/buchungen\?.*#buchung-/);
+  const zielzeile = page.locator('tr[aria-current="true"]');
+  await expect(zielzeile).toContainText("L-4711");
+  await expect(zielzeile).toBeFocused();
+  await page.goto(`/belege/${documentId}`);
   await page.getByRole("button", { name: "Beleg stornieren", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Beleg stornieren?" });
   await expect(dialog).toBeVisible();
@@ -155,8 +162,12 @@ test("Bankzuordnung im Stornodialog bestätigen und zusammen mit dem Beleg zurü
   await page.reload();
   await expect(page.locator(".page-head").getByText("Storniert", { exact: true })).toBeVisible();
   expect((await sql`select id from document_cancellations where document_id = ${documentId}`).length).toBe(1);
+  // Nach dem Storno bleibt der Weg ins Journal, mit der Gegenbuchung (#1855)
+  await expect(page.getByRole("link", { name: /^Gegenbuchung vom / })).toBeVisible();
   await page.getByRole("link", { name: "Gegenbuchung", exact: true }).click();
   await expect(page.getByText(/Storno: Beleg L-4711/)).toBeVisible();
+  // Der Link zeigt auf die Zeile der Gegenbuchung, nicht nur auf den Monat (#1855)
+  await expect(zielzeile).toContainText("Storno: Beleg L-4711");
 });
 
 test("gebuchter Beleg erklärt die Aufteilung über Storno, ein stornierter nicht mehr (#1112)", async () => {
@@ -344,13 +355,9 @@ test("Belegliste: ohne Sortierung ungebuchte zuerst, Spaltenkopf sortiert und ne
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/belege");
   const zeilen = page.locator("a.table-row.document-cols");
-  // Ohne Sortierung stehen ungebuchte Belege oben, auch wenn ihr Datum älter ist (docs/belege.md, „Liste und Status“).
-  // Mehrere ungebuchte Belege sind möglich, deshalb die Reihenfolge prüfen statt den ersten Namen:
-  const texte = await zeilen.allInnerTexts();
-  const altpapier = texte.findIndex((t) => t.includes("Altpapier Ahrens"));
-  const gebuchtL4711 = texte.findIndex((t) => t.includes("L-4711"));
-  expect(altpapier).toBeGreaterThanOrEqual(0);
-  expect(gebuchtL4711).toBeGreaterThan(altpapier);
+  // Ohne Sortierung nach dem Hochladen, der neueste oben, gleich ob gebucht oder nicht (docs/belege.md, „Liste und Status“, #1735)
+  const hochgeladen = (await sql`select id from documents order by uploaded_at desc, id desc`).map((d) => `/belege/${d.id}`);
+  await expect.poll(async () => zeilen.evaluateAll((links) => links.map((a) => a.getAttribute("href")))).toEqual(hochgeladen);
 
   // Die Richtung steht im Namen des Links wie in der Bankliste (BankSortierKopf), damit Screenreader sie vorlesen.
   // Keine festen Namen: in dieser Datei entstehen im Lauf mehrere Belege, teils mit gleichem Lieferanten (R-2 steht zu
