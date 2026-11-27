@@ -253,12 +253,15 @@ test("Tablet (768 px, 861 px) und schmales Handy (320 px): kein Überlauf und ke
   });
   expect(planUeberlappungen, "Zahlungsplan-Vorlagen bei 861px ohne Überlappung").toEqual([]);
 
-  // Schmales Handy (320 px, WCAG 1.4.10): lange Code-URLs laufen nicht aus dem Bild
+  // Schmales Handy (320 px, WCAG 1.4.10): lange Code-URLs laufen nicht aus dem Bild, versteckte Spaltenköpfe breiter
+  // Tabellen (Archiv › Offene Posten) nicht aus ihrem Rollbereich, Kurzwerte der Jahreserklärung nicht aus ihrem Block
   await page.setViewportSize({ width: 320, height: 640 });
-  await page.goto("/einstellungen?bereich=bank");
-  await page.waitForLoadState("networkidle");
-  const overflow320 = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-  expect(overflow320, "/einstellungen?bereich=bank bei 320px ohne Seitenüberlauf").toBeLessThanOrEqual(1);
+  for (const pfad of ["/einstellungen?bereich=bank", "/archiv", `/jahreserklaerung/${YEAR - 1}`]) {
+    await page.goto(pfad);
+    await page.waitForLoadState("networkidle");
+    const overflow320 = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect.soft(overflow320, `${pfad} bei 320px ohne Seitenüberlauf`).toBeLessThanOrEqual(1);
+  }
 });
 
 test("Kontosuche auf /buchungen/neu wird bei Tablet-Breite nicht abgeschnitten", async ({ page }) => {
