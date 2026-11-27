@@ -13,7 +13,12 @@ import { UserError } from "../../errors.ts";
 import { eventKey } from "../bank/index.ts";
 import type { Lieferung, PspAdapter } from "./adapter.ts";
 import { utcDay } from "./regeln.ts";
-import { stripeNaechsterStart } from "./stripe-regeln.ts";
+import {
+  STRIPE_MAX_SCHLUESSEL as MAX_SCHLUESSEL,
+  STRIPE_MAX_SCHLUESSEL_LAENGE as MAX_SCHLUESSEL_LAENGE,
+  stripeMetadatenSchluessel,
+  stripeNaechsterStart,
+} from "./stripe-regeln.ts";
 
 /*
  * Adapter für die Balance Transactions von Stripe (#1280, #1729).
@@ -44,7 +49,33 @@ type StripeZugang = z.infer<typeof zugangSchema>;
 
 const KEY = /^(rk|sk)_live_[A-Za-z0-9]{8,}$/;
 
-export const stripeAdapter: PspAdapter<StripeZugang, Record<string, never>> = {
+/**
+ * `metadataKeys`: Schlüssel der Metadaten für den Verwendungszweck (#1915), als Text mit Komma, weil config nur einfache Werte
+ * nimmt. Gespeichert wird die bereinigte Liste. Verbindungen ohne die Angabe bleiben beim Zweck des Exports.
+ */
+const configSchema = z
+  .object({
+    metadataKeys: z
+      .string()
+      .transform((text, ctx) => {
+        const keys = stripeMetadatenSchluessel(text);
+        // Nach Zeichen, nicht nach UTF-16-Einheiten: Ein Emoji zählt einmal und wird nicht zerschnitten
+        const lang = keys.map((key) => Array.from(key)).find((zeichen) => zeichen.length > MAX_SCHLUESSEL_LAENGE);
+        if (keys.length > MAX_SCHLUESSEL) ctx.addIssue({ code: "custom", message: `Höchstens ${MAX_SCHLUESSEL} Schlüssel der Metadaten.` });
+        if (lang) {
+          ctx.addIssue({
+            code: "custom",
+            message: `Der Schlüssel „${lang.slice(0, MAX_SCHLUESSEL_LAENGE).join("")}…“ ist länger als ${MAX_SCHLUESSEL_LAENGE} Zeichen, so lang erlaubt Stripe keinen.`,
+          });
+        }
+        return keys.join(", ");
+      })
+      .optional(),
+  })
+  .strict();
+type StripeConfig = z.infer<typeof configSchema>;
+
+export const stripeAdapter: PspAdapter<StripeZugang, StripeConfig> = {
   provider: "stripe",
   name: "Stripe",
   beschreibung:
@@ -58,10 +89,18 @@ export const stripeAdapter: PspAdapter<StripeZugang, Record<string, never>> = {
       art: "geheim",
       hint: "Beginnt mit rk_live_ oder sk_live_; er liegt verschlüsselt in der Datenbank. Der öffentliche Schlüssel pk_ reicht nicht.",
     },
+    {
+      name: "metadataKeys",
+      label: "Metadaten im Verwendungszweck",
+      art: "text",
+      config: true,
+      standard: "",
+      hint: "Schlüssel durch Komma getrennt, etwa invoice_number; ihre Werte stehen in dieser Reihenfolge im Zweck neuer Umsätze. Leer: wie beim CSV-Export. Braucht zusätzlich Lesezugriff auf Zahlungen.",
+    },
   ],
   // Vor #1729 lag der Schlüssel als Text in stripe_connections; die Migration hat ihn so übernommen
   zugangLesen: (text) => (text.startsWith("{") ? zugangSchema.parse(JSON.parse(text)) : { art: "schluessel", apiKey: text }),
-  configSchema: z.object({}).strict() as unknown as z.ZodType<Record<string, never>>,
+  configSchema,
   zugangAusEingabe(eingabe, _config, bisher) {
     const apiKey = eingabe.apiKey?.trim();
     if (!apiKey) {
@@ -88,15 +127,16 @@ export const stripeAdapter: PspAdapter<StripeZugang, Record<string, never>> = {
     const dateTo = utcDay(now);
     return { dateFrom: [fetchFrom, dateTo].sort()[0]!, dateTo };
   },
-  async holen(zugang, _config, { accountId, dateFrom, dateTo, now }) {
+  async holen(zugang, config, { accountId, dateFrom, dateTo, now }) {
     const client = clientFor(zugang.apiKey);
     const transactions = await client.balanceTransactions(dateFrom, dateTo);
     const hinweise = client.ohneZahlungsdetails
       ? [
-          "Der Schlüssel erlaubt Stripe nicht, Zahlungen aufzuklappen: Name des Kunden und Bezug von Erstattungen fehlen. Die Umsätze sind vollständig; mit zusätzlichem Lesezugriff (etwa auf Zahlungen und Erstattungen) kommen die Angaben dazu.",
+          "Der Schlüssel erlaubt Stripe nicht, Zahlungen aufzuklappen: Name des Kunden, Bezug von Erstattungen und die Metadaten fehlen. Die Umsätze sind vollständig; schon übernommene bekommen die Angaben nicht nachträglich. Mit zusätzlichem Lesezugriff (etwa auf Zahlungen und Erstattungen) kommen sie bei neuen dazu.",
         ]
       : [];
-    return lieferung(transactions, { accountId, dateFrom, dateTo, now }, hinweise);
+    const metadataKeys = stripeMetadatenSchluessel(config.metadataKeys ?? "");
+    return lieferung(transactions, { accountId, dateFrom, dateTo, now, metadataKeys }, hinweise);
   },
   naechsterStart: ({ fetchFrom }, now) => stripeNaechsterStart(fetchFrom, now),
   standNachFehler: "bisher",
@@ -104,10 +144,10 @@ export const stripeAdapter: PspAdapter<StripeZugang, Record<string, never>> = {
 
 function lieferung(
   transactions: StripeBalanceTransaction[],
-  { accountId, dateFrom, dateTo, now }: { accountId: string; dateFrom: string; dateTo: string; now: Date },
+  { accountId, dateFrom, dateTo, now, metadataKeys }: { accountId: string; dateFrom: string; dateTo: string; now: Date; metadataKeys: string[] },
   hinweise: string[],
 ): Lieferung {
-  const statement = stripeStatement(transactions);
+  const statement = stripeStatement(transactions, metadataKeys);
   const batch = stripeBatch({
     externalAccountId: accountId,
     transactions,
