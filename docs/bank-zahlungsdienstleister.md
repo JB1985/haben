@@ -140,6 +140,7 @@ Statt des CSV-Exports „Balance history“ kann Haben die Umsätze von Stripe s
 - Ihre Werte stehen dann in dieser Reihenfolge als Verwendungszweck neuer Umsätze, zum Beispiel „RE-2026-0117“. Ist darunter die Rechnungs- oder Bestellnummer, zählt sie bei den [Vorschlägen](bank.md#vorschläge) des Abgleichs.
 - Das gilt für Zahlungen, Erstattungen und Streitfälle; Erstattungen und Streitfälle bekommen die Werte der ursprünglichen Zahlung.
 - Ohne Eintrag oder ohne Wert gilt der Zweck des Exports, ebenso immer bei allen anderen Umsätzen, etwa Auszahlungen, Gebühren und Transfers.
+- Für [Dubletten](bank.md#dubletten) zählt weiter der Zweck des Exports, auch wenn der Umsatz die Metadaten zeigt.
 - Wähle nur, was dort dauerhaft stehen darf, denn Bankumsätze lassen sich nicht ändern.
 
 **Wie es gespeichert wird:** Haben speichert jeden Abruf nach dem gemeinsamen Importvertrag für Anbindungen von Banken und Zahlungsdienstleistern, mit dem Stripe-Konto als Quelle. Jede Zahlung und jede Gebühr erkennt Haben an ihrer Kennung wieder. Kommt eine Bewegung mit anderem Betrag, Tag oder anderer Art als schon übernommen, nimmt Haben den Abruf nicht an und zeigt den Konflikt an der Verbindung zum Klären, mit denselben zwei Wegen wie beim [Bankabruf](bank.md#welche-umsätze-abgerufen-werden). Eine Art, die Haben nicht kennt (etwa ein Transfer an ein verbundenes Konto), übernimmt es als Umsatz; der Zeitraum gilt dann nicht als vollständig abgerufen.
